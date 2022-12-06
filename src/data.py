@@ -88,6 +88,7 @@ def load_steam(root):
     this code is copied from SVGA
     """
     if not os.path.exists(os.path.join(root, '../data/Steam', 'processed', 'sp_fts.pkl')):
+        os.mkdir(os.path.join(root, '../data/Steam', 'processed'))
         precess_steam(root)
 
     freq_item_mat = pickle.load(open(os.path.join(root, '../data/Steam', 'processed', 'freq_item_mat.pkl'), 'rb'))
@@ -132,4 +133,5 @@ def load_data(data_name):
 
 
 if __name__ == '__main__':
-    load_data('arxiv')
+    load_data('steam')
+    print('Data process done!')
