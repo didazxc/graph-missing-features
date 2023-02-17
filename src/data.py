@@ -1,13 +1,46 @@
 import os
 from tqdm import tqdm
 from argparse import Namespace
+from collections import defaultdict
 import pickle
 import numpy as np
 import pandas as pd
 import torch
-from ogb.nodeproppred import PygNodePropPredDataset  # ogb must import before pyg and scipy, or it will get stuck
+
+from torch_geometric.data import Data
 from torch_geometric.datasets import Planetoid, Amazon, Coauthor
 import scipy.sparse as sp
+from sklearn.model_selection import train_test_split
+
+
+def is_continuous(data):
+    return data in ['pubmed', 'coauthor', 'arxiv']
+
+
+def validate_edges(edges):
+    """
+    Validate the edges of a graph with various criteria.
+    """
+    return 
+    # No self-loops
+    for src, dst in edges.t():
+        if src.item() == dst.item():
+            raise ValueError()
+
+    # Each edge (a, b) appears only once.
+    m = defaultdict(lambda: set())
+    for src, dst in edges.t():
+        src = src.item()
+        dst = dst.item()
+        if dst in m[src]:
+            raise ValueError()
+        m[src].add(dst)
+
+    # Each pair (a, b) and (b, a) exists together.
+    for src, neighbors in m.items():
+        for dst in neighbors:
+            if src not in m[dst]:
+                raise ValueError()
 
 
 def precess_steam(root):
@@ -106,11 +139,12 @@ def load_steam(root):
     return Namespace(data=Namespace(x=features, y=labels, edge_index=edge_index))
 
 
-def load_data(data_name):
+def load_data(data_name, split=None, seed=None, verbose=False):
     root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
     if data_name == 'steam':
         data = load_steam(root)
     elif data_name == 'arxiv':
+        from ogb.nodeproppred import PygNodePropPredDataset  # ogb must import before pyg and scipy, or it will get stuck
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
@@ -122,14 +156,55 @@ def load_data(data_name):
         data = Amazon(root, 'Computers')
     elif data_name == 'photo':
         data = Amazon(root, 'Photo')
-    elif data_name == 'cs':
+    elif data_name == 'cs' or data_name == 'coauthor':
         data = Coauthor(root, 'CS')
     elif data_name == 'physics':
         data = Coauthor(root, 'Physics')
     else:
         raise ValueError(data_name)
 
-    return data
+    dat = data.data
+
+    node_x = dat.x
+    node_y = dat.y
+    edges = dat.edge_index
+
+    validate_edges(edges)
+
+    if split is None:
+        if hasattr(dat, 'train_mask'):
+            trn_mask = dat.train_mask
+            val_mask = dat.val_mask
+            trn_nodes = torch.nonzero(trn_mask).view(-1)
+            val_nodes = torch.nonzero(val_mask).view(-1)
+            test_nodes = torch.nonzero(~(trn_mask | val_mask)).view(-1)
+        else:
+            trn_nodes, val_nodes, test_nodes = None, None, None
+    elif len(split) == 3 and sum(split) == 1:
+        trn_size, val_size, test_size = split
+        indices = np.arange(node_x.shape[0])
+        trn_nodes, test_nodes = train_test_split(indices, test_size=test_size, random_state=seed,
+                                                 stratify=node_y)
+        trn_nodes, val_nodes = train_test_split(trn_nodes, test_size=val_size / (trn_size + val_size),
+                                                random_state=seed, stratify=node_y[trn_nodes])
+
+        trn_nodes = torch.from_numpy(trn_nodes)
+        val_nodes = torch.from_numpy(val_nodes)
+        test_nodes = torch.from_numpy(test_nodes)
+    else:
+        raise ValueError(split)
+
+    if verbose:
+        print('Data:', data_name)
+        print('Number of nodes:', node_x.size(0))
+        print('Number of edges:', edges.size(1) // 2)
+        print('Number of features:', node_x.size(1))
+        print('Ratio of nonzero features:', (node_x > 0).float().mean().item())
+        print('Number of classes:', node_y.max().item() + 1 if node_y is not None else 0)
+        print()
+
+    # return data
+    return edges, node_x, node_y, trn_nodes, val_nodes, test_nodes
 
 
 if __name__ == '__main__':

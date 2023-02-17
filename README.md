@@ -1,7 +1,7 @@
 # Works on graph with missing features
 
 
-# 参考文献
+# REFERENCES
 
 1. [Accurate Node Feature Estimation
 with Structured Variational Graph Autoencoder](https://arxiv.org/abs/2206.04516)
