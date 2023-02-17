@@ -114,9 +114,11 @@ class Scores:
         else:
             self.dict[col][row].append(value)
 
-    def print(self):
+    def print(self, file_name=None):
         df_dict = {col:{row: np.mean(row_v) for row, row_v in col_v.items()} for col, col_v in self.dict.items()}
         df = pd.DataFrame(df_dict)
+        if file_name is not None:
+            df.to_csv("{file_name}.csv")
         print(df)
 
 
@@ -264,14 +266,17 @@ if __name__=="__main__":
             scores = Scores(x_all, trn_nodes, val_nodes, test_nodes)
             apa = APA(50)
 
+            ks=[3, 5, 10] if dataset_name=="steam" else [10, 20, 50]
+            datas=['trn', 'val', 'tst']
+
             if run_baseline:
                 x_hat = apa.fp(x_all, edge_index, trn_nodes)
-                scores.validate(x_hat, dataset_name, "fp", ks=[10, 20, 50], datas=['trn', 'val', 'tst'])
+                scores.validate(x_hat, dataset_name, "fp", ks=ks, datas=datas)
             
             if run_pr:
-                scores.validate_best(apa.pr, edge_index, alphas, dataset_name, "pr", ks=[10, 20, 50], datas=['trn', 'val', 'tst'])
+                scores.validate_best(apa.pr, edge_index, alphas, dataset_name, "pr", ks=ks, datas=datas)
 
             if run_mtp:
-                scores.validate_best(apa.mtp, edge_index, alphas, dataset_name, "mtp", ks=[10, 20, 50], datas=['trn', 'val', 'tst'])
+                scores.validate_best(apa.mtp, edge_index, alphas, dataset_name, "mtp", ks=ks, datas=datas)
 
-    scores.print()
+    scores.print("mtp")
