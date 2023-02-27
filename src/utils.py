@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import functools
 import time
+import random
 
 
 logging.basicConfig(level=logging.WARN,
@@ -78,6 +79,7 @@ class SearchPoints:
         self.best_points = [self.center_point]
         self.best_score = None
         self.best_out = None
+        self.max_best_points_num = 4
 
     def expand_neighbors(self, steps: List[float], ranges: List[Tuple[float, float]]):
         """
@@ -103,18 +105,19 @@ class SearchPoints:
         """
         Search for the optimal param in the *points*, then update self.best_points.
         """
-        for point in points:
+        for idx, point in enumerate(points):
             score, out = score_fn(point)
             self.searched_points.add(json.dumps(point))
             if score == self.best_score:
-                self.best_score = score
                 self.best_points.append(point)
                 self.best_out.append(out)
+                if len(self.best_points)>self.max_best_points_num:
+                    self.best_points.pop(random.randint(0,self.max_best_points_num))
             elif self.best_score is None or greater_is_better == (score > self.best_score):
                 self.best_score = score
                 self.best_points = [point]
                 self.best_out = [out]
-            logger.debug(f"point={point}/{points}, best_points={self.best_points}, best_score={self.best_score}, searched_points={self.searched_points}")
+            logger.debug(f"point={point}, progress={idx+1}/{len(points)}, best_points={self.best_points}, best_score={self.best_score}, searched_points={len(self.searched_points)}")
 
     def search(self, score_fn:Callable[[List[float]], Tuple[float, Any]], greater_is_better:bool=True, precision:float=0.01):
         """

@@ -108,10 +108,11 @@ class APA(torch.nn.Module):
 
     def fp(self, out:torch.Tensor=None, num_iter: int=1, **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = torch.nn.functional.normalize(self.out, p=2, dim=1)
+        out_k_init = torch.nn.functional.normalize(self.out_k_init, p=2, dim=1)
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
-            out[self.known_mask] = self.out_k_init
+            out[self.known_mask] = out_k_init
         return out
 
     def fp_analytical_solution(self) -> torch.Tensor:
@@ -317,24 +318,20 @@ class Validator:
 
 
 if __name__=="__main__":
-
     run_baseline = False
     run_pr = False
     run_ppr = False
     run_mtp = False
     run_umtp = True
-    alpha, beta = 0.85, 0.75
-    alphas = [i/100 for i in range(0, 101, 5)]
-    betas = [i/100 for i in range(0, 101, 5)]
-    dataset_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
-    datas=['tst'] #['trn', 'val', 'tst']
-    file_name = "umtp_maxp30_search"
+    dataset_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']  # 'steam' why only related to alpha?
+    datas=['tst']
+    file_name = "umtp30"
     scores = Scores()
     max_num_iter = 30
 
     for dataset_name in dataset_names:
         ks= [3, 5, 10] if dataset_name=="steam" else [10, 20, 50]
-        for seed in range(1):
+        for seed in range(10):
             np.random.seed(seed)
             torch.manual_seed(seed)
             torch.backends.cudnn.deterministic = True
@@ -350,15 +347,16 @@ if __name__=="__main__":
                 v.validate(apa.fp, ks=ks, datas=datas)
             
             if run_pr:
-                v.validate_best(apa.pr, max_num_iter, {"alpha":alphas}, ks=ks, datas=datas)
+                v.validate_best(apa.pr, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
             
             if run_ppr:
-                v.validate_best(apa.ppr, max_num_iter, {"alpha":alphas}, ks=ks, datas=datas)
+                v.validate_best(apa.ppr, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
 
             if run_mtp:
-                v.validate_best(apa.mtp, max_num_iter, {"alpha":alphas}, ks=ks, datas=datas)
+                v.validate_best(apa.mtp, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
             
             if run_umtp:
                 v.validate_best(apa.umtp, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)}, ks=ks, datas=datas)
-
+            
     scores.print(file_name)
+    print("end")

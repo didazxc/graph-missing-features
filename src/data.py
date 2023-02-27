@@ -6,11 +6,11 @@ import pickle
 import numpy as np
 import pandas as pd
 import torch
-
 from torch_geometric.data import Data
 from torch_geometric.datasets import Planetoid, Amazon, Coauthor
 import scipy.sparse as sp
 from sklearn.model_selection import train_test_split
+from ogb.nodeproppred import PygNodePropPredDataset  # ogb must import before pyg and scipy, or it will get stuck
 
 
 def is_continuous(data):
@@ -144,7 +144,6 @@ def load_data(data_name, split=None, seed=None, verbose=False):
     if data_name == 'steam':
         data = load_steam(root)
     elif data_name == 'arxiv':
-        from ogb.nodeproppred import PygNodePropPredDataset  # ogb must import before pyg and scipy, or it will get stuck
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
