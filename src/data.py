@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 
 
 def is_continuous(data):
-    return data in ['pubmed', 'coauthor', 'arxiv']
+    return data in ['pubmed', 'coauthor', 'cs', 'arxiv']
 
 
 def validate_edges(edges):
