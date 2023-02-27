@@ -67,12 +67,13 @@ class Scores:
 class SearchPoints:
     def __init__(self, **params_range_kw):
         """
+        Search for the optimal params in the range of *params_range_kw*, then save best params in self.best_points, and save the output of *score_fn* in self.best_score and self.best_out.
         params_range_kw = {'alpha':(0,1), 'beta':(0,1)}
         """
         self.tags = list(params_range_kw.keys())
         self.ranges = [params_range_kw[t] for t in self.tags]
         self.center_point = [(a[0]+a[1])/2 for a in self.ranges]
-        self.steps = [(a[1]-a[0]) for a in self.ranges]
+        self.steps = [a[1]-a[0] for a in self.ranges]
         self.searched_points = set()
         self.best_points = [self.center_point]
         self.best_score = None
@@ -81,10 +82,12 @@ class SearchPoints:
     def expand_neighbors(self, steps: List[float], ranges: List[Tuple[float, float]]):
         """
         steps: the step of every param
+        expande neighbors for self.best_points in ranges 
         """
         points = set()
         for center_point in self.best_points:
             for i, (v, step) in enumerate(zip(center_point, steps)):
+                if step==0: continue
                 for s in [-step, step]:
                     value = v + s
                     for v_range in ranges:
@@ -97,6 +100,9 @@ class SearchPoints:
         return [json.loads(point_str) for point_str in points]
 
     def search_points(self, points:List[List[float]], score_fn:Callable[[List[float]], Tuple[float, Any]], greater_is_better: bool=True):
+        """
+        Search for the optimal param in the *points*, then update self.best_points.
+        """
         for point in points:
             score, out = score_fn(point)
             self.searched_points.add(json.dumps(point))
@@ -111,6 +117,9 @@ class SearchPoints:
             logger.debug(f"point={point}/{points}, best_points={self.best_points}, best_score={self.best_score}, searched_points={self.searched_points}")
 
     def search(self, score_fn:Callable[[List[float]], Tuple[float, Any]], greater_is_better:bool=True, precision:float=0.01):
+        """
+        score_fn returns score and x_hat
+        """
         points = self.best_points.copy()
         self.search_points(points, score_fn, greater_is_better)
         steps = self.steps
