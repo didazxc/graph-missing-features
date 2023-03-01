@@ -6,11 +6,10 @@ import pickle
 import numpy as np
 import pandas as pd
 import torch
-from torch_geometric.data import Data
+from torch_geometric.utils import to_undirected
 from torch_geometric.datasets import Planetoid, Amazon, Coauthor
 import scipy.sparse as sp
 from sklearn.model_selection import train_test_split
-from ogb.nodeproppred import PygNodePropPredDataset  # ogb must import before pyg and scipy, or it will get stuck
 
 
 def is_continuous(data):
@@ -21,11 +20,10 @@ def validate_edges(edges):
     """
     Validate the edges of a graph with various criteria.
     """
-    return 
     # No self-loops
     for src, dst in edges.t():
         if src.item() == dst.item():
-            raise ValueError()
+            raise ValueError("has self-loops")
 
     # Each edge (a, b) appears only once.
     m = defaultdict(lambda: set())
@@ -33,14 +31,14 @@ def validate_edges(edges):
         src = src.item()
         dst = dst.item()
         if dst in m[src]:
-            raise ValueError()
+            raise ValueError("appears more than once")
         m[src].add(dst)
 
     # Each pair (a, b) and (b, a) exists together.
     for src, neighbors in m.items():
         for dst in neighbors:
             if src not in m[dst]:
-                raise ValueError()
+                raise ValueError("lack of inverse edge")
 
 
 def precess_steam(root):
@@ -144,7 +142,9 @@ def load_data(data_name, split=None, seed=None, verbose=False):
     if data_name == 'steam':
         data = load_steam(root)
     elif data_name == 'arxiv':
+        from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)
+        data.data.edge_index = to_undirected(data.data.edge_index)
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
     elif data_name == 'citeseer':

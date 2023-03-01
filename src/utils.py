@@ -9,7 +9,7 @@ import random
 
 
 logging.basicConfig(level=logging.WARN,
-                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    format='%(asctime)s %(name)-10s %(filename)-12s[line:%(lineno)-3d] %(funcName)-20s %(levelname)-8s %(message)s',
                     datefmt='%m-%d %H:%M')
 logger = logging.getLogger('g.apa')
 logger.setLevel(logging.DEBUG)
@@ -81,7 +81,7 @@ class SearchPoints:
         self.best_out = None
         self.max_best_points_num = 4
 
-    def expand_neighbors(self, steps: List[float], ranges: List[Tuple[float, float]]):
+    def expand_neighbors(self, steps: List[float], ranges: List[Tuple[float, float]]) -> List[list]:
         """
         steps: the step of every param
         expande neighbors for self.best_points in ranges 
@@ -106,7 +106,7 @@ class SearchPoints:
         Search for the optimal param in the *points*, then update self.best_points.
         """
         for idx, point in enumerate(points):
-            score, out = score_fn(point)
+            score, out, *msg = score_fn(point)
             self.searched_points.add(json.dumps(point))
             if score == self.best_score:
                 self.best_points.append(point)
@@ -117,7 +117,9 @@ class SearchPoints:
                 self.best_score = score
                 self.best_points = [point]
                 self.best_out = [out]
-            logger.debug(f"point={point}, progress={idx+1}/{len(points)}, best_points={self.best_points}, best_score={self.best_score}, searched_points={len(self.searched_points)}")
+            
+            debug_msg = msg[0] if len(msg)>0 else ''
+            logger.debug(f"{debug_msg} {len(self.searched_points):4d}:{str(point):20s} {idx+1:3d}/{len(points):3d} score={score:.6f}/{self.best_score:.6f} best_points={self.best_points}")
 
     def search(self, score_fn:Callable[[List[float]], Tuple[float, Any]], greater_is_better:bool=True, precision:float=0.01):
         """

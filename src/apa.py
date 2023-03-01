@@ -225,6 +225,13 @@ class Validator:
         self.dataset_name = dataset_name
         self.edge_index, self.x_all, self.trn_nodes, self.val_nodes, self.test_nodes = edge_index, x_all, trn_nodes, val_nodes, test_nodes
         self.datas = {"trn": self.trn_nodes, "val": self.val_nodes, "tst": self.test_nodes}
+        self.record_datas = ['tst']
+        if d.is_continuous(dataset_name):
+            self.val_top_ks = [-1]
+            self.metrics = ['CORR', 'RMSE']
+        else:
+            self.val_top_ks = [3, 5, 10] if dataset_name=="steam" else [10, 20, 50]
+            self.metrics = ["nDCG", "Recall"]
 
     def _calc_single_score(self, x_hat, nodes, k, metric):
         if d.is_continuous(self.dataset_name):
@@ -242,27 +249,22 @@ class Validator:
             else:
                 raise Exception(f"no this metric {metric}")
 
-    def _calc_and_record_scores(self, x_hat, algo_name, k, metric, datas, params_kw):
+    def _calc_and_record_scores(self, x_hat, algo_name, k, metric, params_kw):
         row = f"{metric}_{algo_name}"
-        for data_name in datas:
+        for data_name in self.record_datas:
             col, score = self._calc_single_score(x_hat, self.datas[data_name], k, metric)
             col = col if data_name=='tst' else f"{col}_{data_name}"
             self.scores.add_score(row, col, score)
         if params_kw is not None:
             self.scores.add_score(row, f"{self.dataset_name}@{k}_params", str(params_kw))
 
-    def validate(self, apa_fn, params_kw=None, ks=[10,20,50], datas=['tst']):
+    def validate(self, apa_fn, params_kw:dict={}):
         algo_name = apa_fn.__name__
         logger.info(f"validate [{algo_name}] in [{self.dataset_name}]")
         x_hat = apa_fn(**params_kw)
-        if d.is_continuous(self.dataset_name):
-            ks = [10]
-            metrics = ['CORR', 'RMSE']
-        else:
-            metrics = ["nDCG", "Recall"]
-        for metric in metrics:
-            for k in ks:
-                self._calc_and_record_scores(x_hat, algo_name, k, metric, datas, params_kw)
+        for metric in self.metrics:
+            for k in self.val_top_ks:
+                self._calc_and_record_scores(x_hat, algo_name, k, metric, params_kw)
         self.scores.print(None)
     
     def _product_search_best(self, apa_fn, params_kw:dict = {'alpha':[0.0,0.5,1.0], 'beta':[0.0,0.5,1.0], 'num_iter':[1]}, k:int=10, metric:str="CORR"):
@@ -279,41 +281,36 @@ class Validator:
                 best_params = params
         return best_params, best_x_hat
     
-    def _search_best(self, apa_fn, max_num_iter:int, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, k:int=10, metric:str="CORR"):
+    def _search_best(self, apa_fn, max_num_iter:int, min_num_iter:int=3, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, k:int=10, metric:str="CORR"):
         s = SearchPoints(**params_range_kw)
-        s.best_num_iter = 0
         def score_fn(point):
-            logger.debug(f"{dataset_name}@{k}, metric={metric}, point={point}")
             best_score = None
             best_x_hat = None
+            best_num_iter = 0
             x_hat = None
             for iter_i in range(1, max_num_iter+1):
                 x_hat = apa_fn(x_hat,**{tag:p for tag, p in zip(s.tags, point)})
                 _, curr_score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
-                if best_score is None or greater_is_better(metric) == (curr_score>best_score):
+                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
                     best_score = curr_score
                     best_x_hat = x_hat
-                    s.best_num_iter=iter_i
-            return best_score, best_x_hat
+                    best_num_iter=iter_i
+            debug_msg = f"{dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
+            return best_score, (best_x_hat, best_num_iter), debug_msg
         s.search(score_fn, greater_is_better(metric))
 
         best_params = {tag:p for tag, p in zip(s.tags, s.best_points[0])}
-        best_params["num_iter"] = s.best_num_iter
-        return  best_params, s.best_out[0]
+        best_params["num_iter"] = s.best_out[0][1]
+        return  best_params, s.best_out[0][0]
 
     @print_time_cost
-    def validate_best(self, apa_fn, max_num_iter:int, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, ks=[10,20,50], datas=['tst']):
+    def validate_best(self, apa_fn, max_num_iter:int, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}):
         algo_name = apa_fn.__name__
         logger.info(f"validate_best [{algo_name}] in [{self.dataset_name}] with params_range_kw={params_range_kw}")
-        if d.is_continuous(self.dataset_name):
-            ks = [10]
-            metrics = ['CORR', 'RMSE']
-        else:
-            metrics = ["nDCG", "Recall"]
-        for metric in metrics:
-            for k in ks:
-                best_params, best_x_hat = self._search_best(apa_fn, max_num_iter, params_range_kw, k, metric)
-                self._calc_and_record_scores(best_x_hat, algo_name, k, metric, datas, best_params)
+        for metric in self.metrics:
+            for k in self.val_top_ks:
+                best_params, best_x_hat = self._search_best(apa_fn, max_num_iter, params_range_kw=params_range_kw, k=k, metric=metric)
+                self._calc_and_record_scores(best_x_hat, algo_name, k, metric, best_params)
                 self.scores.print(None)
 
 
@@ -323,19 +320,18 @@ if __name__=="__main__":
     run_ppr = False
     run_mtp = False
     run_umtp = True
-    dataset_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']  # 'steam' why only related to alpha?
-    datas=['tst']
-    file_name = "umtp30"
+    dataset_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']  # 'steam' why only related to alpha?  'arxiv' is a directed graph
+    file_name = "arxiv_umtp30_s1"
     scores = Scores()
-    max_num_iter = 30
+    max_num_iter = 50
 
-    for dataset_name in dataset_names:
-        ks= [3, 5, 10] if dataset_name=="steam" else [10, 20, 50]
-        for seed in range(10):
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+    for seed in range(1):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+        for dataset_name in dataset_names:
 
             logger.info(f"dataset_name={dataset_name}, seed={seed}")
             
@@ -344,19 +340,19 @@ if __name__=="__main__":
             v = Validator(scores, dataset_name, edge_index, x_all, trn_nodes, val_nodes, test_nodes)
             
             if run_baseline:
-                v.validate(apa.fp, ks=ks, datas=datas)
+                v.validate(apa.fp)
             
             if run_pr:
-                v.validate_best(apa.pr, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
+                v.validate_best(apa.pr, max_num_iter, {"alpha":(0.0, 1.0)})
             
             if run_ppr:
-                v.validate_best(apa.ppr, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
+                v.validate_best(apa.ppr, max_num_iter, {"alpha":(0.0, 1.0)})
 
             if run_mtp:
-                v.validate_best(apa.mtp, max_num_iter, {"alpha":(0.0, 1.0)}, ks=ks, datas=datas)
+                v.validate_best(apa.mtp, max_num_iter, {"alpha":(0.0, 1.0)})
             
             if run_umtp:
-                v.validate_best(apa.umtp, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)}, ks=ks, datas=datas)
-            
+                v.validate_best(apa.umtp, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)})
+
     scores.print(file_name)
     print("end")
