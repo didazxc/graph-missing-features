@@ -138,7 +138,7 @@ def load_steam(root):
 
 
 def load_data(data_name, split=None, seed=None, verbose=False):
-    root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
     if data_name == 'steam':
         data = load_steam(root)
     elif data_name == 'arxiv':
