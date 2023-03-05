@@ -12,6 +12,10 @@ import scipy.sparse as sp
 from sklearn.model_selection import train_test_split
 
 
+def is_binary(data):
+    return data in ['cora', 'citeseer', 'computers', 'photo', 'steam', 'cs']
+
+
 def is_continuous(data):
     return data in ['pubmed', 'coauthor', 'cs', 'arxiv']
 
@@ -187,9 +191,9 @@ def load_data(data_name, split=None, seed=None, verbose=False):
         trn_nodes, val_nodes = train_test_split(trn_nodes, test_size=val_size / (trn_size + val_size),
                                                 random_state=seed, stratify=node_y[trn_nodes])
 
-        trn_nodes = torch.from_numpy(trn_nodes)
-        val_nodes = torch.from_numpy(val_nodes)
-        test_nodes = torch.from_numpy(test_nodes)
+        trn_nodes = torch.from_numpy(trn_nodes).to(torch.long)
+        val_nodes = torch.from_numpy(val_nodes).to(torch.long)
+        test_nodes = torch.from_numpy(test_nodes).to(torch.long)
     else:
         raise ValueError(split)
 
