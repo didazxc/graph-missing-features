@@ -10,16 +10,21 @@ import matplotlib.pyplot as plt
 matplotlib.use("Agg")
 
 
+def density(node_x, edges):
+    n_nodes = node_x.size(0)
+    return 2*edges.size(1)/(n_nodes*(n_nodes-1))
+
+
 def num_components(node_x, edges):
     n_nodes = node_x.size(0)
     adj = to_scipy_sparse_matrix(edge_index=edges, num_nodes=n_nodes)
-    num = sp.csgraph.connected_components(adj, connection="weak", return_labels=False)
+    num = sp.csgraph.connected_components(adj, directed=False, connection="weak", return_labels=False)
     return num
 
 
-def homophily(node_x, edges):
-    mean = node_x.mean(dim=0)
-    std = node_x.std(dim=0)
+def homophily(node_x, edges, normalize:bool=True):
+    mean = node_x.mean(dim=0) if normalize else 0
+    std = node_x.std(dim=0) if normalize else 1
     x = (node_x - mean) / std
     x[torch.isinf(x)] = 0
     x[torch.isnan(x)] = 0
@@ -48,12 +53,11 @@ def draw_spectral(data_name, x, edge_index):
 def main():
     need_draw_spring = False
     need_draw_spectral = False
-    data_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
-    print(f'{"":10s} homophily num_components assortativity')
+    data_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
+    print(f'{"":10s} homophily num_components assortativity density')
     for data_name in data_names:
         edges, node_x, *_ = load_data(data_name, split=(0.4, 0.1, 0.5), seed=0)
-        print(
-            f'{data_name:10s} {homophily(node_x, edges):{len("homophily")}.4f} {num_components(node_x, edges):{len("num_components")}d} {assortativity(edges):{len("assortativity")}.4f}', )
+        print(f'{data_name:10s} {homophily(node_x, edges):{len("homophily")}.4f} {num_components(node_x, edges):{len("num_components")}d} {assortativity(edges):{len("assortativity")}.4f} {density(node_x, edges):{len("density")}.4f}')
         if need_draw_spring:
             draw(data_name, x=node_x, edge_index=edges)
         if need_draw_spectral:

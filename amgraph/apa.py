@@ -66,7 +66,6 @@ class Decoder(nn.Module):
 class APA:
 
     def __init__(self, x: torch.Tensor, edge_index: Adj, known_mask: torch.Tensor, is_binary: bool):
-        super().__init__()
         self.x = x
         self.n_nodes = x.size(0)
         self.edge_index = edge_index
@@ -74,8 +73,6 @@ class APA:
         self.known_mask = known_mask
         self.mean = 0 if is_binary else x[known_mask].mean(dim=0)
         self.std = 1  # if is_binary else x[known_mask].std(dim=0)
-        print("self.std", self.std)
-        print("self.mean", self.mean)
         self.out_k_init = (x[known_mask]-self.mean) / self.std
         # init
         self.out = torch.zeros_like(x)
@@ -160,6 +157,48 @@ class APA:
         L1 = torch.eye(n_nodes)*(n_nodes/(n_nodes-1)) - torch.ones(n_nodes, n_nodes)/(n_nodes-1)
         out = torch.mm(torch.inverse(L+lamda*Ik+theta*L1), lamda*torch.mm(Ik, self.out))
         return out
+
+
+class APA2:
+
+    def __init__(self, x: torch.Tensor, edge_index: Adj, known_mask: torch.Tensor, val_mask:torch.Tensor):
+        self.x = x
+        self.n_nodes = x.size(0)
+        self.edge_index = edge_index
+        self.adj = get_propagation_matrix(edge_index, self.n_nodes)
+        self.known_mask = known_mask
+        self.val_mask = val_mask
+        self.out_k_init = x[known_mask]
+        self.mean = x[known_mask].mean(dim=0)
+        # for Ps
+        self.z_ones = torch.zeros(self.n_nodes, 1)
+        self.z_ones[self.known_mask] = 1
+        self.z_ones_k_init = self.z_ones[self.known_mask].clone()
+        # init
+        self.out = torch.zeros_like(x)
+        self.out[known_mask] = self.out_k_init
+        
+    def umtp(self, out: torch.Tensor, out_k_init: torch.Tensor, alpha: float = 0.85, beta: float = 0.70, num_iter: int = 1, **kw) -> torch.Tensor:
+        for _ in range(num_iter):
+            out = alpha*torch.spmm(self.adj, out)+(1-alpha)*out.mean(dim=0)
+            out[self.known_mask] = beta*out[self.known_mask] + (1-beta)*out_k_init
+        return out
+
+    def run(self, Ps=None, x_hat=None, new_x_hat=None, alpha: float = 0.85, beta: float = 0.70, num_iter: int = 1, **kw):
+        if Ps is None:
+            Ps = self.z_ones
+        if x_hat is None:
+            x_hat = self.out
+        if new_x_hat is None:
+            new_x_hat = self.out
+        Ps = self.umtp(Ps, self.z_ones_k_init, alpha, beta, num_iter, **kw)
+        x_Ps = Ps[self.known_mask] - 1
+        x_hat = self.umtp(x_hat, self.out_k_init, alpha, beta, num_iter, **kw)
+        M = torch.mm(x_Ps.T,(x_hat[self.known_mask] - self.x[self.known_mask])) / torch.mm(x_Ps.T, x_Ps)
+        # M = self.mean
+        new_x_hat = self.umtp(new_x_hat - M, self.out_k_init - M, alpha, beta, num_iter, **kw) + M
+        return Ps, x_hat, new_x_hat
+ 
 
 
 class UMTPDecoder:
@@ -295,6 +334,45 @@ class Validator:
         s = SearchPoints(**params_range_kw)
 
         def score_fn(point):
+            params = {tag:p for tag, p in zip(s.tags, point)}
+            params['num_iter'] = max_num_iter
+            x_hat = apa_fn(**params)
+            _, score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
+            return score, (x_hat, max_num_iter), f"{self.dataset_name}@{k} {metric} "
+
+        def multi_score_fn(point):
+            params = {tag:p for tag, p in zip(s.tags, point)}
+            best_score = None
+            best_x_hat = None
+            best_num_iter = 0
+            for iter_i in range(1, max_num_iter+1):
+                params['num_iter'] = iter_i
+                x_hat = apa_fn(**params)
+                _, curr_score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
+                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
+                    best_score = curr_score
+                    best_x_hat = x_hat
+                    best_num_iter=iter_i
+            debug_msg = f"{self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
+            return best_score, (best_x_hat, best_num_iter), debug_msg
+
+        def apa2_score_fn(point):
+            params = {tag:p for tag, p in zip(s.tags, point)}
+            best_score = None
+            best_x_hat = None
+            best_num_iter = 0
+            Ps, x_hat, new_x_hat = None, None, None
+            for iter_i in range(1, max_num_iter+1):
+                Ps, x_hat, new_x_hat = apa_fn(Ps, x_hat, new_x_hat, **params)
+                _, curr_score = self._calc_single_score(new_x_hat, self.val_nodes, k, metric)
+                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
+                    best_score = curr_score
+                    best_x_hat = new_x_hat
+                    best_num_iter=iter_i
+            debug_msg = f"{self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
+            return best_score, (best_x_hat, best_num_iter), debug_msg
+
+        def iter_score_fn(point):
             best_score = None
             best_x_hat = None
             best_num_iter = 0
@@ -308,7 +386,8 @@ class Validator:
                     best_num_iter=iter_i
             debug_msg = f"{self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
             return best_score, (best_x_hat, best_num_iter), debug_msg
-        s.search(score_fn, greater_is_better(metric))
+
+        s.search(apa2_score_fn, greater_is_better(metric))
 
         best_params = {tag:p for tag, p in zip(s.tags, s.best_points[0])}
         best_params["num_iter"] = s.best_out[0][1]
@@ -331,10 +410,10 @@ def main():
     run_ppr = False
     run_mtp = False
     run_umtp = True
-    dataset_names = ['arxiv', 'pubmed', 'cs']  # [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
-    file_name = "arxiv_umtp30_s1"
+    dataset_names = ['pubmed']  # [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
+    file_name = "pubmed_umtp30"
     scores = Scores()
-    max_num_iter = 30
+    max_num_iter = 50
 
     for seed in range(1):
         np.random.seed(seed)
@@ -350,6 +429,8 @@ def main():
             apa = APA(x_all, edge_index, trn_nodes, d.is_binary(dataset_name))
             v = Validator(scores, dataset_name, edge_index, x_all, trn_nodes, val_nodes, test_nodes)
 
+            apa2 = APA2(x_all, edge_index, trn_nodes, val_nodes)
+
             if run_baseline:
                 v.validate(apa.fp)
 
@@ -363,7 +444,8 @@ def main():
                 v.validate_best(apa.mtp, max_num_iter, {"alpha":(0.0, 1.0)})
 
             if run_umtp:
-                v.validate_best(apa.umtp, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)})
+                # v.validate_best(apa.umtp, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)})
+                v.validate_best(apa2.run, max_num_iter, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)})
 
     scores.print(file_name)
     print("end")
