@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 
 
 def is_binary(data):
-    return data in ['cora', 'citeseer', 'computers', 'photo', 'steam', 'cs']
+    return data in ['cora', 'citeseer', 'computers', 'photo', 'steam', 'cs', 'steam20', 'steam1']
 
 
 def is_continuous(data):
@@ -27,7 +27,7 @@ def validate_edges(edges):
     # No self-loops
     for src, dst in edges.t():
         if src.item() == dst.item():
-            raise ValueError("has self-loops")
+            raise ValueError(f"{src} has self-loops")
 
     # Each edge (a, b) appears only once.
     m = defaultdict(lambda: set())
@@ -35,14 +35,14 @@ def validate_edges(edges):
         src = src.item()
         dst = dst.item()
         if dst in m[src]:
-            raise ValueError("appears more than once")
+            raise ValueError(f"({src}->{dst}) appears more than once")
         m[src].add(dst)
 
     # Each pair (a, b) and (b, a) exists together.
     for src, neighbors in m.items():
         for dst in neighbors:
             if src not in m[dst]:
-                raise ValueError("lack of inverse edge")
+                raise ValueError(f"({src}->{dst}) lack of inverse edge")
 
 
 def precess_steam(root):
@@ -118,10 +118,7 @@ def precess_steam(root):
     pickle.dump(tagID_Idx_map, open(os.path.join(processed_dir, 'tagID_Idx_map.pkl'), 'wb'))
 
 
-def load_steam(root):
-    """
-    this code is copied from SVGA
-    """
+def load_steam(root, threshold: float = 10.0):
     if not os.path.exists(os.path.join(root, '../data/Steam', 'processed', 'sp_fts.pkl')):
         os.mkdir(os.path.join(root, '../data/Steam', 'processed'))
         precess_steam(root)
@@ -132,8 +129,8 @@ def load_steam(root):
     labels = torch.zeros(features.size(0), dtype=torch.int)
 
     adj = freq_item_mat.copy()
-    adj[adj < 10.0] = 0.0
-    adj[adj >= 10.0] = 1.0
+    adj[adj < threshold] = 0.0
+    adj[adj >= threshold] = 1.0
     indices = np.where(adj != 0.0)
     rows = indices[0]
     cols = indices[1]
@@ -145,6 +142,10 @@ def load_data(data_name, split=None, seed=None, verbose=False):
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
     if data_name == 'steam':
         data = load_steam(root)
+    elif data_name == 'steam1':
+        data = load_steam(root, 1.0)
+    elif data_name == 'steam20':
+        data = load_steam(root, 20.0)
     elif data_name == 'arxiv':
         from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)

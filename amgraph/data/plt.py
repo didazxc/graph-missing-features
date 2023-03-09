@@ -10,6 +10,12 @@ import matplotlib.pyplot as plt
 matplotlib.use("Agg")
 
 
+def attr_sparsity(node_x):
+    n_nodes=node_x.size(0)
+    n_attrs=node_x.size(1)
+    return torch.count_nonzero(node_x).item()/n_nodes/n_attrs
+
+
 def density(node_x, edges):
     n_nodes = node_x.size(0)
     return 2*edges.size(1)/(n_nodes*(n_nodes-1))
@@ -29,9 +35,10 @@ def homophily(node_x, edges, normalize:bool=True):
     x[torch.isinf(x)] = 0
     x[torch.isnan(x)] = 0
     n_nodes = x.size(0)
+    n_attrs = x.size(1)
     edge_index, edge_weight = get_laplacian(edges, num_nodes=n_nodes, normalization="sym")
     L = torch.sparse.FloatTensor(edge_index, values=edge_weight, size=(n_nodes, n_nodes))
-    return torch.trace(torch.mm(x.T, torch.spmm(L, x))) / n_nodes
+    return torch.trace(torch.mm(x.T, torch.spmm(L, x))) / n_nodes / n_attrs
 
 
 def draw(data_name, x, edge_index):
@@ -53,11 +60,11 @@ def draw_spectral(data_name, x, edge_index):
 def main():
     need_draw_spring = False
     need_draw_spectral = False
-    data_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
-    print(f'{"":10s} homophily num_components assortativity density')
+    data_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'steam20', 'steam1', 'pubmed', 'cs', 'arxiv']
+    print(f'{"":10s} nodes_num edges_num attrs_num homophily num_components assortativity density attr_sparsity')
     for data_name in data_names:
         edges, node_x, *_ = load_data(data_name, split=(0.4, 0.1, 0.5), seed=0)
-        print(f'{data_name:10s} {homophily(node_x, edges):{len("homophily")}.4f} {num_components(node_x, edges):{len("num_components")}d} {assortativity(edges):{len("assortativity")}.4f} {density(node_x, edges):{len("density")}.4f}')
+        print(f'{data_name:10s} {node_x.size(0):{len("nodes_num")}d} {edges.size(1):{len("edges_num")}d} {node_x.size(1):{len("attrs_num")}d} {homophily(node_x, edges):{len("homophily")}.4f} {num_components(node_x, edges):{len("num_components")}d} {assortativity(edges):{len("assortativity")}.4f} {density(node_x, edges):{len("density")}.4f} {attr_sparsity(node_x):{len("attr_sparsity")}.4f}')
         if need_draw_spring:
             draw(data_name, x=node_x, edge_index=edges)
         if need_draw_spectral:
