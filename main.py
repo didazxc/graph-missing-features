@@ -1,5 +1,5 @@
 from amgraph.data import plt
-from amgraph import apa
+from amgraph import validator
 
 '''
            homophily num_components assortativity
@@ -27,4 +27,4 @@ arxiv        99.9231              1       -0.0431  0.0002
 
 if __name__ == '__main__':
     # plt.main()
-    apa.main()
+    validator.main()

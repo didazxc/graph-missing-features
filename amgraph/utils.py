@@ -6,11 +6,13 @@ import pandas as pd
 import functools
 import time
 import random
+import numbers
+
 
 logging.basicConfig(level=logging.WARN,
-                    format='%(asctime)s %(name)-10s %(filename)-12s[line:%(lineno)-3d] %(funcName)-20s %(levelname)-8s %(message)s',
+                    format='%(asctime)s %(name)-10s %(filename)-12s[line:%(lineno)-3d] %(funcName)-15s %(levelname)-8s %(message)s',
                     datefmt='%m-%d %H:%M')
-logger = logging.getLogger('g.apa')
+logger = logging.getLogger('amgraph.apa')
 logger.setLevel(logging.DEBUG)
 
 
@@ -29,41 +31,45 @@ def print_time_cost(fn):
 
 
 class Scores:
-    def __init__(self) -> None:
+    def __init__(self, file_name="scores.npy") -> None:
         self.dict = {}
+        if not file_name.endswith(".npy"):
+            self.file_name = f"{file_name}.npy"
+        else:
+            self.file_name = file_name
 
     def add_score(self, row, col, value):
         if col not in self.dict:
             self.dict[col] = {}
-        if isinstance(value, str):
-            if row not in self.dict[col]:
-                self.dict[col][row] = value
-            else:
-                self.dict[col][row] += value
+        if row not in self.dict[col]:
+            self.dict[col][row] = [value]
         else:
-            if row not in self.dict[col]:
-                self.dict[col][row] = [value]
-            else:
-                self.dict[col][row].append(value)
+            self.dict[col][row].append(value)
 
-    def print(self, file_name=None):
+    def get_value(self, row, col):
+        return self.dict[col][row] if col in self.dict and row in self.dict[col] else None
+
+    def get_cnt(self, row, col):
+        return len(self.dict[col][row]) if col in self.dict and row in self.dict[col] else 0
+
+    def print(self):
         self.save()
-        df_dict = {col: {row: np.mean(row_v) if isinstance(row_v, list) else row_v for row, row_v in col_v.items()} for
-                   col, col_v in self.dict.items()}
+        df_dict = {col: {
+            row: np.mean(row_v) if isinstance(row_v, list) and all([isinstance(v, numbers.Number) for v in row_v]) else row_v
+            for row, row_v in col_v.items()
+        } for col, col_v in self.dict.items()}
         df = pd.DataFrame(df_dict)
-        if file_name is not None:
-            df.to_csv(f"{file_name}.csv")
-            self.save(file_name)
+        df.to_csv(self.file_name.replace('.npy','.csv'))
         print(df)
 
-    def save(self, file_name='scores.npy'):
-        np.save(file_name, self.dict)
+    def save(self):
+        np.save(self.file_name, self.dict)
 
-    def load(self, file_name='scores.npy'):
+    def load(self):
         try:
-            self.dict = np.load(file_name).item()
+            self.dict = np.load(self.file_name, allow_pickle=True).item()
         except Exception:
-            logger.info(f'cannot load data, maybe no {file_name}. So use an empty scores.')
+            logger.info(f'cannot load data, maybe no {self.file_name}. So use an empty scores.')
 
 
 class SearchPoints:

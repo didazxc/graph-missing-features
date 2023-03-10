@@ -5,6 +5,11 @@ from sklearn.metrics import ndcg_score
 
 
 @torch.no_grad()
+def to_acc(y_hat: torch.Tensor, y: torch.Tensor):
+    return torch.sum(y_hat == y) / y.size(0)
+
+
+@torch.no_grad()
 def to_recall(input, target, k=10):
     pred = input.topk(k, dim=1, sorted=False)[1]
     row_index = torch.arange(target.size(0))

@@ -135,7 +135,7 @@ def load_steam(root, threshold: float = 10.0):
     rows = indices[0]
     cols = indices[1]
     edge_index = torch.from_numpy(np.stack([rows, cols], axis=0))
-    return Namespace(data=Namespace(x=features, y=labels, edge_index=edge_index))
+    return Namespace(data=Namespace(x=features, y=labels, edge_index=edge_index), num_classes=1)
 
 
 def load_data(data_name, split=None, seed=None, verbose=False):
@@ -208,7 +208,7 @@ def load_data(data_name, split=None, seed=None, verbose=False):
         print()
 
     # return data
-    return edges, node_x, node_y, trn_nodes, val_nodes, test_nodes
+    return edges, node_x, node_y, trn_nodes, val_nodes, test_nodes, data.num_classes
 
 
 if __name__ == '__main__':
