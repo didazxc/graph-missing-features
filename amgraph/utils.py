@@ -38,19 +38,29 @@ class Scores:
         else:
             self.file_name = file_name
 
-    def add_score(self, row, col, value):
+    def add_score(self, row, col, value, idx=None):
         if col not in self.dict:
             self.dict[col] = {}
-        if row not in self.dict[col]:
-            self.dict[col][row] = [value]
+        if idx is None:
+            if row not in self.dict[col]:
+                self.dict[col][row] = [value]
+            else:
+                self.dict[col][row].append(value)
         else:
-            self.dict[col][row].append(value)
+            s = len(self.dict[col][row]) if row in self.dict[col] else 0
+            for _ in range(s, idx):
+                self.dict[col][row].append(None)
+            if len(self.dict[col][row])<=idx:
+                self.dict[col][row].append(value)
+            else:
+                self.dict[col][row][idx] = value
 
     def get_value(self, row, col):
         return self.dict[col][row] if col in self.dict and row in self.dict[col] else None
 
-    def get_cnt(self, row, col):
-        return len(self.dict[col][row]) if col in self.dict and row in self.dict[col] else 0
+    def has_value(self, row, col, idx):
+        cnt = len(self.dict[col][row]) if col in self.dict and row in self.dict[col] else 0
+        return cnt > idx
 
     def print(self):
         self.save()

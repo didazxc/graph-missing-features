@@ -10,123 +10,44 @@ import numpy as np
 import torch
 from sklearn.model_selection import KFold
 from torch import nn
+from multiprocessing import Pool, Queue, Process, Manager
 
 
 logger = logging.getLogger('amgraph.apa')
 
 
 class EstimationValidator:
-    def __init__(self, scores: Scores, dataset_name:str, x_all, trn_nodes, val_nodes, test_nodes, seed_idx) -> None:
-        self.scores = scores
+    def __init__(self, dataset_name:str, x_all, trn_nodes, val_nodes, test_nodes, max_num_iter:int, seed_idx, min_num_iter: int = 0) -> None:
         self.dataset_name = dataset_name
-        self.x_all, self.trn_nodes, self.val_nodes, self.test_nodes, self.seed_idx = x_all, trn_nodes, val_nodes, test_nodes, seed_idx
-        self.datas = {"trn": self.trn_nodes, "val": self.val_nodes, "tst": self.test_nodes}
+        self.x_all = x_all
+        self.seed_idx = seed_idx
+        self.datas = {"trn": trn_nodes, "val": val_nodes, "tst": test_nodes}
         self.record_datas = ['tst']
-        if d.is_continuous(dataset_name):
-            self.val_top_ks = [-1]
-            self.metrics = ['CORR', 'RMSE']
-        else:
-            self.val_top_ks = [3, 5, 10] if dataset_name.startswith("steam") else [10, 20, 50]
-            self.metrics = ["nDCG", "Recall"]
+        self.max_num_iter = max_num_iter
+        self.min_num_iter = min_num_iter
 
-    def _calc_single_score(self, x_hat, nodes, k, metric):
-        return calc_single_score(self.dataset_name, x_hat, self.x_all, nodes, k, metric)
-
-    def _calc_and_record_scores(self, x_hat, algo_name, k, metric, params_kw):
+    @staticmethod
+    def is_executed(scores: Scores, seed_idx, dataset_name, algo_name, metric, k):
         row = f"{metric}_{algo_name}"
-        for data_name in self.record_datas:
-            col, score = self._calc_single_score(x_hat, self.datas[data_name], k, metric)
-            col = col if data_name=='tst' else f"{col}_{data_name}"
-            self.scores.add_score(row, col, score)
-        if params_kw is not None:
-            self.scores.add_score(row, f"{self.dataset_name}@{k}_params", params_kw)
+        col = f"{dataset_name}@{k}_params"
+        return scores.has_value(row, col, idx=seed_idx)
 
-    def _is_executed(self, algo_name, k, metric):
-        row = f"{metric}_{algo_name}"
-        col = f"{self.dataset_name}@{k}_params"
-        return self.scores.get_cnt(row, col) > self.seed_idx
-
-    def validate(self, apa_fn, num_iter:int=1, params_kw:dict={}):
-        algo_name = apa_fn.__name__
-        logger.info(f"validate [{algo_name}] in [{self.dataset_name}]")
-        params_kw["num_iter"] = num_iter
-        x_hat = apa_fn(**params_kw)
-        for metric in self.metrics:
-            for k in self.val_top_ks:
-                if not self._is_executed(algo_name, k, metric):
-                    self._calc_and_record_scores(x_hat, algo_name, k, metric, params_kw)
-        self.scores.print()
-
-    def _product_search_best(self, apa_fn, params_kw:dict = {'alpha':[0.0,0.5,1.0], 'beta':[0.0,0.5,1.0], 'num_iter':[1]}, k:int=10, metric:str="CORR"):
-        best_params = None
-        best_x_hat = None
-        best_score = None
-        params_product = [{p_k:p_v for p_k,p_v in zip(params_kw.keys(),p_vs)}  for p_vs in itertools.product(*params_kw.values()) ]
-        for params in params_product:
-            x_hat = apa_fn(**params)
-            _, curr_score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
-            if best_score is None or greater_is_better(metric) == (curr_score>best_score):
-                best_score = curr_score
-                best_x_hat = x_hat
-                best_params = params
-        return best_params, best_x_hat
-
-    def _search_best(self, apa_fn, max_num_iter:int, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, min_num_iter:int=0, k:int=10, metric:str="CORR"):
+    def _search_best(self, apa_fn, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, metric:str="CORR", k:int=10):
         s = SearchPoints(**params_range_kw)
-
-        def score_fn(point):
-            params = {tag:p for tag, p in zip(s.tags, point)}
-            params['num_iter'] = max_num_iter
-            out = apa_fn()
-            x_hat = apa_fn(out, **params)
-            _, score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
-            return score, (x_hat, max_num_iter), f"{self.dataset_name}@{k} {metric} "
-
-        def multi_score_fn(point):
-            params = {tag:p for tag, p in zip(s.tags, point)}
-            best_score = None
-            best_x_hat = None
-            best_num_iter = 0
-            for iter_i in range(1, max_num_iter+1):
-                params['num_iter'] = iter_i
-                x_hat = apa_fn(**params)
-                _, curr_score = self._calc_single_score(x_hat, self.val_nodes, k, metric)
-                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
-                    best_score = curr_score
-                    best_x_hat = x_hat
-                    best_num_iter=iter_i
-            debug_msg = f"{self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
-            return best_score, (best_x_hat, best_num_iter), debug_msg
-
-        def apa2_score_fn(point):
-            params = {tag:p for tag, p in zip(s.tags, point)}
-            best_score = None
-            best_x_hat = None
-            best_num_iter = 0
-            Ps, x_hat = None, None,
-            for iter_i in range(1, max_num_iter+1):
-                Ps, x_hat, new_x_hat = apa_fn(Ps, x_hat, **params)
-                _, curr_score = self._calc_single_score(new_x_hat, self.val_nodes, k, metric)
-                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
-                    best_score = curr_score
-                    best_x_hat = new_x_hat
-                    best_num_iter=iter_i
-            debug_msg = f"{self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
-            return best_score, (best_x_hat, best_num_iter), debug_msg
 
         def iter_score_fn(point):
             best_score = None
             best_x_hat = None
             best_num_iter = 0
             x_hat = None
-            for iter_i in range(0, max_num_iter+1):
+            for iter_i in range(0, self.max_num_iter+1):
                 x_hat = apa_fn(x_hat,**{tag:p for tag, p in zip(s.tags, point)})
-                _, curr_score = self._calc_single_score(x_hat, self.test_nodes, k, metric)
-                if iter_i>=min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
+                curr_score = calc_single_score(self.dataset_name, x_hat, self.x_all, self.datas['val'], metric, k)
+                if iter_i>=self.min_num_iter and (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
                     best_score = curr_score
                     best_x_hat = x_hat
                     best_num_iter=iter_i
-            debug_msg = f"{apa_fn.__name__:5s} {self.dataset_name}@{k} {metric}, num_iter={best_num_iter:3d}"
+            debug_msg = f"{apa_fn.__name__:5s} {self.dataset_name}@{k} {metric}, seed_idx={self.seed_idx}, num_iter={best_num_iter:3d}"
             return best_score, (best_x_hat, best_num_iter), debug_msg
 
         s.search(iter_score_fn, greater_is_better(metric))
@@ -136,15 +57,24 @@ class EstimationValidator:
         return  best_params, s.best_out[0][0]
 
     @print_time_cost
-    def validate_best(self, apa_fn, max_num_iter:int, params_range_kw:dict = {'alpha':(0.0,1.0), 'beta':(0.0,1.0)}, min_num_iter:int=0):
+    def search_best_scores(self, apa_fn, params_range_kw:dict, metric:str, k:int, metrics=None, ks=None) -> list:
         algo_name = apa_fn.__name__
-        logger.info(f"validate_best [{algo_name}] in [{self.dataset_name}] with params_range_kw={params_range_kw}")
-        for metric in self.metrics:
-            for k in self.val_top_ks:
-                if not self._is_executed(algo_name, k, metric):
-                    best_params, best_x_hat = self._search_best(apa_fn, max_num_iter, params_range_kw=params_range_kw, k=k, metric=metric, min_num_iter=min_num_iter)
-                    self._calc_and_record_scores(best_x_hat, algo_name, k, metric, best_params)
-                    self.scores.print()
+        best_params, best_x_hat = self._search_best(apa_fn, params_range_kw=params_range_kw, metric=metric, k=k)
+        scores = []
+        if metrics is None:
+            metrics = [metric]
+        if ks is None:
+            ks = [k]
+        for metric in metrics:
+            row = f"{metric}_{algo_name}"
+            for k in ks:
+                col = f"{self.dataset_name}@{k}"
+                for data_name in self.record_datas:
+                    score = calc_single_score(self.dataset_name, best_x_hat, self.x_all, self.datas[data_name], metric, k)
+                    col = col if data_name=='tst' else f"{col}_{data_name}"
+                    scores.append((row, col, score))
+                scores.append((row, f"{self.dataset_name}@{k}_params", best_params))
+        return scores
 
 
 class ClassificationValidator:
@@ -230,12 +160,31 @@ class ClassificationValidator:
                             self._add_score(row, col, conv, acc)
 
 
-def estimate(run_baseline = True, run_pr = True, run_ppr = True, run_mtp = True, run_umtp = True, run_umtp2 = True):
+def q2scores(q:Queue, scores:Scores):
+    while True:
+        row, col, value, seed = q.get(True)
+        scores.add_score(row, col, value, seed)
+        if col.endswith("_params"):
+            scores.print()
 
-    dataset_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'steam1', 'pubmed', 'cs', 'arxiv']
+
+def qval(q:Queue, v:EstimationValidator, algo, kw, metric, k, seed):
+    for row,col,value in v.search_best_scores(algo, kw, metric, k):
+        q.put((row, col, value, seed))
+
+
+def estimate():
+    dataset_names=['cora', 'citeseer']  # ['cora', 'citeseer', 'computers', 'photo', 'steam', 'steam1', 'pubmed', 'cs', 'arxiv']
+    run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2']
     scores = Scores(file_name="all_umtp30")
     scores.load()
     max_num_iter = 30
+    
+    pool = Pool(processes=2)
+    q = Manager().Queue()
+
+    read2scores = Process(target=q2scores, args=(q,scores))
+    read2scores.start()
 
     for seed in range(10):
         np.random.seed(seed)
@@ -244,37 +193,48 @@ def estimate(run_baseline = True, run_pr = True, run_ppr = True, run_mtp = True,
         torch.backends.cudnn.benchmark = False
 
         for dataset_name in dataset_names:
+            if d.is_continuous(dataset_name):
+                val_top_ks = [-1]
+                metrics = ['RMSE', 'CORR']
+            else:
+                val_top_ks = [3, 5, 10] if dataset_name.startswith("steam") else [10, 20, 50]
+                metrics = ["Recall", "nDCG"]
+
             if dataset_name == 'steam' and max_num_iter>5:
                 max_num_iter = 5
             elif dataset_name == 'steam1':
                 max_num_iter = 1
 
-            logger.info(f"dataset_name={dataset_name}, seed={seed}")
-
             edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
           
             apa = APA(x_all, edge_index, trn_nodes, d.is_binary(dataset_name))
-            v = EstimationValidator(scores, dataset_name, x_all, trn_nodes, val_nodes, test_nodes, seed_idx=seed)
+            v = EstimationValidator(dataset_name, x_all, trn_nodes, val_nodes, test_nodes, max_num_iter, seed_idx=seed)
 
-            if run_baseline:
-                v.validate_best(apa.fp, max_num_iter, params_range_kw={"alpha":(0.0, 0.0)})
+            algos = {
+                'fp':(apa.fp, {"alpha":(0.0, 0.0)}),
+                'pr':(apa.pr, {"alpha":(0.0, 1.0)}),
+                'ppr':(apa.ppr, {"alpha":(0.0, 1.0)}),
+                'mtp':(apa.mtp, {"alpha":(0.0, 1.0)}),
+                'umtp':(apa.umtp, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)}),
+                'umtp2':(apa.umtp2, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
+            }
 
-            if run_pr:
-                v.validate_best(apa.pr, max_num_iter, params_range_kw={"alpha":(0.0, 1.0)})
-
-            if run_ppr:
-                v.validate_best(apa.ppr, max_num_iter, params_range_kw={"alpha":(0.0, 1.0)})
-
-            if run_mtp:
-                v.validate_best(apa.mtp, max_num_iter, params_range_kw={"alpha":(0.0, 1.0)})
-
-            if run_umtp:
-                v.validate_best(apa.umtp, max_num_iter, params_range_kw={"alpha":(0.0, 1.0), "beta":(0.0, 1.0)})
-            
-            if run_umtp2:
-                v.validate_best(apa.umtp2, max_num_iter, params_range_kw={"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
-
+            for algo_name in run_algos:
+                algo = algos[algo_name][0]
+                kw = algos[algo_name][1]
+                for metric in metrics:
+                    for k in val_top_ks:
+                        # if not v.is_executed(scores, seed_idx=seed, dataset_name=dataset_name, algo_name=algo.__name__, metric=metric, k=k):
+                        #     for row, col, value in v.search_best_scores(algo, kw, metric, k):
+                        #         scores.add_score(row, col, value, idx=seed)
+                        #         scores.print()
+                        if not v.is_executed(scores, seed_idx=seed, dataset_name=dataset_name, algo_name=algo.__name__, metric=metric, k=k):
+                            pool.apply_async(qval, args=(q, v, algo, kw, metric, k, seed), error_callback=lambda x:print(x))
+    
+    pool.close()
+    pool.join()
     scores.print()
+    read2scores.terminate()
     print("end")
 
 

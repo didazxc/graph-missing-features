@@ -43,7 +43,7 @@ class APA:
         self.x = x
         self.n_nodes = x.size(0)
         self.edge_index = edge_index
-        self.adj = get_propagation_matrix(edge_index, self.n_nodes)
+        self._adj = None
         self.known_mask = known_mask
         self.mean = 0 if is_binary else x[known_mask].mean(dim=0)
         self.std = 1  # if is_binary else x[known_mask].std(dim=0)
@@ -54,6 +54,12 @@ class APA:
             self.out[known_mask] = x[known_mask]
         else:
             self.out = out_init
+    
+    @property
+    def adj(self):
+        if self._adj is None:
+            self._adj = get_propagation_matrix(self.edge_index, self.n_nodes)
+        return self._adj
 
     def fp(self, out: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:

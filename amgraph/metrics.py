@@ -52,19 +52,19 @@ def to_r2(input, target):
     return (1 - a / b).item()
 
 
-def calc_single_score(dataset_name, x_hat, x_all, nodes, k, metric):
+def calc_single_score(dataset_name, x_hat, x_all, nodes, metric, k):
     if d.is_continuous(dataset_name):
         if metric == "CORR":
-            return dataset_name, to_r2(x_hat[nodes], x_all[nodes])
+            return to_r2(x_hat[nodes], x_all[nodes])
         elif metric == "RMSE":
-            return dataset_name, to_rmse(x_hat[nodes], x_all[nodes])
+            return to_rmse(x_hat[nodes], x_all[nodes])
         else:
             raise Exception(f"no this metric {metric}")
     else:
         if metric == "nDCG":
-            return f"{dataset_name}@{k}", to_ndcg(x_hat[nodes], x_all[nodes], k=k)
+            return to_ndcg(x_hat[nodes], x_all[nodes], k=k)
         elif metric == "Recall":
-            return f"{dataset_name}@{k}", to_recall(x_hat[nodes], x_all[nodes], k=k)
+            return to_recall(x_hat[nodes], x_all[nodes], k=k)
         else:
             raise Exception(f"no this metric {metric}")
 
