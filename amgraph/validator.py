@@ -179,12 +179,13 @@ def estimate():
     scores = Scores(file_name="all_umtp30")
     scores.load()
     max_num_iter = 30
+    num_processes = 2
     
-    pool = Pool(processes=2)
-    q = Manager().Queue()
-
-    read2scores = Process(target=q2scores, args=(q,scores))
-    read2scores.start()
+    if num_processes>1:
+        pool = Pool(processes=num_processes)
+        q = Manager().Queue()
+        read2scores = Process(target=q2scores, args=(q,scores))
+        read2scores.start()
 
     for seed in range(10):
         np.random.seed(seed)
@@ -224,17 +225,18 @@ def estimate():
                 kw = algos[algo_name][1]
                 for metric in metrics:
                     for k in val_top_ks:
-                        # if not v.is_executed(scores, seed_idx=seed, dataset_name=dataset_name, algo_name=algo.__name__, metric=metric, k=k):
-                        #     for row, col, value in v.search_best_scores(algo, kw, metric, k):
-                        #         scores.add_score(row, col, value, idx=seed)
-                        #         scores.print()
                         if not v.is_executed(scores, seed_idx=seed, dataset_name=dataset_name, algo_name=algo.__name__, metric=metric, k=k):
-                            pool.apply_async(qval, args=(q, v, algo, kw, metric, k, seed), error_callback=lambda x:print(x))
-    
-    pool.close()
-    pool.join()
-    scores.print()
-    read2scores.terminate()
+                            if num_processes>1:
+                                pool.apply_async(qval, args=(q, v, algo, kw, metric, k, seed), error_callback=lambda x:print(x))
+                            else:
+                                for row, col, value in v.search_best_scores(algo, kw, metric, k):
+                                    scores.add_score(row, col, value, idx=seed)
+                                    scores.print()
+    if num_processes>1:
+        pool.close()
+        pool.join()
+        scores.print()
+        read2scores.terminate()
     print("end")
 
 
