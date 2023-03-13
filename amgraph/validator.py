@@ -168,18 +168,19 @@ def q2scores(q:Queue, scores:Scores):
             scores.print()
 
 
-def qval(q:Queue, v:EstimationValidator, algo, kw, metric, k, seed):
-    for row,col,value in v.search_best_scores(algo, kw, metric, k):
+def qval(q:Queue, v:EstimationValidator, algo, kw, metric, k, seed, all_metrics, all_ks):
+    for row,col,value in v.search_best_scores(algo, kw, metric, k, metrics=all_metrics, ks=all_ks):
         q.put((row, col, value, seed))
 
 
 def estimate():
-    dataset_names=['cora', 'citeseer']  # ['cora', 'citeseer', 'computers', 'photo', 'steam', 'steam1', 'pubmed', 'cs', 'arxiv']
+    dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'steam1', 'pubmed', 'cs', 'arxiv']
     run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2']
     scores = Scores(file_name="all_umtp30")
     scores.load()
     max_num_iter = 30
     num_processes = 2
+    only_val_once = False
     
     if num_processes>1:
         pool = Pool(processes=num_processes)
@@ -194,12 +195,18 @@ def estimate():
         torch.backends.cudnn.benchmark = False
 
         for dataset_name in dataset_names:
+            all_metrics, all_ks = None, None
             if d.is_continuous(dataset_name):
                 val_top_ks = [-1]
                 metrics = ['RMSE', 'CORR']
             else:
                 val_top_ks = [3, 5, 10] if dataset_name.startswith("steam") else [10, 20, 50]
                 metrics = ["Recall", "nDCG"]
+            if only_val_once:
+                all_metrics = metrics
+                all_ks = val_top_ks
+                metrics = metrics[0]
+                val_top_ks = val_top_ks[0]
 
             if dataset_name == 'steam' and max_num_iter>5:
                 max_num_iter = 5
@@ -227,9 +234,9 @@ def estimate():
                     for k in val_top_ks:
                         if not v.is_executed(scores, seed_idx=seed, dataset_name=dataset_name, algo_name=algo.__name__, metric=metric, k=k):
                             if num_processes>1:
-                                pool.apply_async(qval, args=(q, v, algo, kw, metric, k, seed), error_callback=lambda x:print(x))
+                                pool.apply_async(qval, args=(q, v, algo, kw, metric, k, seed, all_metrics, all_ks), error_callback=lambda x:print(x))
                             else:
-                                for row, col, value in v.search_best_scores(algo, kw, metric, k):
+                                for row, col, value in v.search_best_scores(algo, kw, metric, k, metrics=all_metrics, ks=all_ks):
                                     scores.add_score(row, col, value, idx=seed)
                                     scores.print()
     if num_processes>1:

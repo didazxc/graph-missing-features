@@ -47,7 +47,9 @@ class Scores:
             else:
                 self.dict[col][row].append(value)
         else:
-            s = len(self.dict[col][row]) if row in self.dict[col] else 0
+            if row not in self.dict[col]:
+                self.dict[col][row] = []
+            s = len(self.dict[col][row])
             for _ in range(s, idx):
                 self.dict[col][row].append(None)
             if len(self.dict[col][row])<=idx:
