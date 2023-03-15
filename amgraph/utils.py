@@ -16,6 +16,13 @@ logger = logging.getLogger('amgraph.apa')
 logger.setLevel(logging.DEBUG)
 
 
+def get_time_cost(s_time):
+    e_time = time.time()
+    m, s = divmod(e_time - s_time, 60)
+    h, m = divmod(m, 60)
+    return f'{int(h):2d}h{int(m):2d}m{s:5.2f}s'
+
+
 def print_time_cost(fn):
     @functools.wraps(fn)
     def wrapper(*arg, **kwarg):
@@ -76,12 +83,20 @@ class Scores:
 
     def save(self):
         np.save(self.file_name, self.dict)
+        return self
+
+    def combine(self, file_names):
+        self.dict = {}
+        for file_name in file_names:
+            self.dict.update(np.load(file_name, allow_pickle=True).item())
+        return self
 
     def load(self):
         try:
             self.dict = np.load(self.file_name, allow_pickle=True).item()
         except Exception:
             logger.info(f'cannot load data, maybe no {self.file_name}. So use an empty scores.')
+        return self
 
 
 class SearchPoints:
@@ -127,6 +142,7 @@ class SearchPoints:
         Search for the optimal param in the *points*, then update self.best_points.
         """
         for idx, point in enumerate(points):
+            t_start = time.time()
             score, out, *msg = score_fn(point)
             self.searched_points.add(json.dumps(point))
             if score == self.best_score:
@@ -138,10 +154,10 @@ class SearchPoints:
                 self.best_score = score
                 self.best_points = [point]
                 self.best_out = [out]
-
+            cost_str = get_time_cost(t_start)
             debug_msg = msg[0] if len(msg) > 0 else ''
             logger.debug(
-                f"{debug_msg} {len(self.searched_points):4d}:{str(point):20s} {idx + 1:3d}/{len(points):3d} score={score:.6f}/{self.best_score:.6f} best_points={self.best_points}")
+                f"{debug_msg} {len(self.searched_points):4d}:{str(point):20s} {idx + 1:3d}/{len(points):3d} cost={cost_str} score={score:.6f}/{self.best_score:.6f} best_points={self.best_points}")
 
     def search(self, score_fn: Callable[[List[float]], Tuple[float, Any, str]], greater_is_better: bool = True,
                precision: float = 0.01):

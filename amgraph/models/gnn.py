@@ -4,7 +4,7 @@ from torch_geometric.nn import GATConv, SAGEConv, GCNConv
 
 class GNN(nn.Module):
     
-    def __init__(self, num_attrs, num_classes, num_layers=2, hidden_size=16, dropout=0.5, residual=True, conv='gcn'):
+    def __init__(self, num_attrs, num_classes, num_layers=2, hidden_size=256, dropout=0.5, residual=True, conv='gcn'):
         super().__init__()
         self.residual = residual
         self.conv = conv

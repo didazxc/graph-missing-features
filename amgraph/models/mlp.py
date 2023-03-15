@@ -3,7 +3,7 @@ from torch import nn
 
 class MLP(nn.Module):
 
-    def __init__(self, input_size, output_size, hidden_size=16, num_layers=2, dropout=0.5):
+    def __init__(self, input_size, output_size, hidden_size=256, num_layers=2, dropout=0.5):
         super().__init__()
         layers = []
         for i in range(num_layers):
@@ -14,5 +14,5 @@ class MLP(nn.Module):
             layers.append(nn.Linear(in_size, out_size))
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, egdes):
         return self.layers(x)
