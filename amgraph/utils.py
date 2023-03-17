@@ -88,6 +88,8 @@ class Scores:
     def combine(self, file_names):
         self.dict = {}
         for file_name in file_names:
+            if not file_name.endswith(".npy"):
+                file_name = f"{file_name}.npy"
             self.dict.update(np.load(file_name, allow_pickle=True).item())
         return self
 

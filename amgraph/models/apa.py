@@ -63,7 +63,7 @@ class APA:
 
     def fp(self, out: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
@@ -92,7 +92,7 @@ class APA:
 
     def pr(self, out: torch.Tensor = None, alpha: float = 0.85, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = alpha * torch.spmm(self.adj, out) + (1-alpha)*out.mean(dim=0)
@@ -101,7 +101,7 @@ class APA:
 
     def ppr(self, out: torch.Tensor = None, alpha: float = 0.85, weight: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         if weight is None:
             weight = self.mean
@@ -112,7 +112,7 @@ class APA:
 
     def mtp(self, out: torch.Tensor = None, alpha: float = 0.85, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
@@ -121,7 +121,7 @@ class APA:
 
     def umtp(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = alpha*torch.spmm(self.adj, out)+(1-alpha)*out.mean(dim=0)
@@ -130,7 +130,7 @@ class APA:
     
     def umtp2(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            return self.out
+            out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = gamma*(alpha*torch.spmm(self.adj, out)+(1-alpha)*out.mean(dim=0))+(1-gamma)*out
