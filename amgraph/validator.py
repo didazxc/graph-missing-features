@@ -245,7 +245,7 @@ class ClassificationValidator:
                 col = f"{self.dataset_name}@{k}_params"
 
                 if any([not self._is_executed(row, col, conv) for conv in convs]):
-                    params = est_scores.get_value(row, col)[self.seed_idx]
+                    params = {} if algo_name.startswith("raw_") else est_scores.get_value(row, col)[self.seed_idx]
                     logger.info(f"{algo_name}, {row}, {col}, {params}")
                     x_hat=apa_fn(**params)
 
@@ -256,7 +256,7 @@ class ClassificationValidator:
         self.scores.print()
 
     @staticmethod
-    def run(file_name="class_all_umtp30", est_scores_file_name="all_umtp30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], val_only_once=True, k_index=0):
+    def run(file_name="class_all_umtp30", est_scores_file_name="all_umtp30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['raw','fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], val_only_once=True, k_index=0):
         est_scores = Scores(file_name=est_scores_file_name)
         est_scores.load()
         scores = Scores(file_name=file_name)
@@ -274,7 +274,12 @@ class ClassificationValidator:
                 apa = APA(x_all, edge_index, trn_nodes, d.is_binary(dataset_name))
                 induced_edge_index, _ = subgraph(test_nodes, edge_index)
                 c = ClassificationValidator(scores, dataset_name=dataset_name, edges=induced_edge_index, y_all=y_all, test_nodes=test_nodes, num_attrs=x_all.size(1), num_classes=num_classes, epoches=epoches, seed=seed, seed_idx=seed, k_index=k_index)
+                
+                def raw_fn(**kw):
+                    return x_all
+                
                 algos = {
+                        'raw':raw_fn,
                         'fp':apa.fp,
                         'pr':apa.pr,
                         'ppr':apa.ppr,
@@ -296,6 +301,6 @@ def main():
     # EstimationValidator.multi_run("combine_k10_eq30", max_num_iter=30, early_stop=False)
     # EstimationValidator.multi_run("combine_k50_le30", max_num_iter=30, early_stop=True, k_index= -1)
     # EstimationValidator.multi_run("combine_k50_eq30", max_num_iter=30, early_stop=False, k_index= -1)
-    # ClassificationValidator.run(file_name="class_k10_eq30_test", est_scores_file_name="combine_k10_eq30")
+    # ClassificationValidator.run(file_name="class_k10_eq30", est_scores_file_name="combine_k10_eq30")
     ClassificationValidator.run(file_name="class_all_le30", est_scores_file_name="combine_all_le30", val_only_once=False)
 
