@@ -1,4 +1,7 @@
+from collections import defaultdict
+from itertools import permutations
 import torch
+from torch import nn
 from torch_scatter import scatter_add
 from torch_geometric.typing import Adj
 from torch_geometric.utils import get_laplacian, remove_self_loops
@@ -37,13 +40,31 @@ def get_propagation_matrix(edge_index: Adj, n_nodes: int, mode: str = "adj") -> 
     return adj
 
 
+def get_edge_index_from_y(y: torch.Tensor, known_mask: torch.Tensor = None) -> Adj:
+    nodes = defaultdict(list)
+    label_idx_iter = enumerate(y.numpy()) if known_mask is None else zip(known_mask.numpy(),y[known_mask].numpy())
+    for idx, label in label_idx_iter:
+        nodes[label].append(idx)
+    arr = []
+    for v in nodes.values():
+        arr += list(permutations(v, 2))
+    return torch.tensor(arr, dtype=torch.long).T
+
+
+def to_dirichlet_loss(attrs, laplacian):
+    return torch.bmm(attrs.t().unsqueeze(1), laplacian.matmul(attrs).t().unsqueeze(2)).view(-1).sum()
+
+
 class APA:
 
-    def __init__(self, x: torch.Tensor, edge_index: Adj, known_mask: torch.Tensor, is_binary: bool, out_init=None):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor, edge_index: Adj, known_mask: torch.Tensor, is_binary: bool, out_init=None):
         self.x = x
+        self.y = y
         self.n_nodes = x.size(0)
         self.edge_index = edge_index
         self._adj = None
+        self._label_adj = None
+        self._label_all_adj = None
         self.known_mask = known_mask
         self.mean = 0 if is_binary else x[known_mask].mean(dim=0)
         self.std = 1  # if is_binary else x[known_mask].std(dim=0)
@@ -60,6 +81,20 @@ class APA:
         if self._adj is None:
             self._adj = get_propagation_matrix(self.edge_index, self.n_nodes)
         return self._adj
+
+    @property
+    def label_adj(self):
+        if self._label_adj is None:
+            edge_index = get_edge_index_from_y(self.y, self.known_mask)
+            self._label_adj = get_propagation_matrix(edge_index, self.n_nodes)
+        return self._label_adj
+    
+    @property
+    def label_all_adj(self):
+        if self._label_all_adj is None:
+            edge_index = get_edge_index_from_y(self.y)
+            self._label_all_adj = get_propagation_matrix(edge_index, self.n_nodes)
+        return self._label_all_adj
 
     def fp(self, out: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
@@ -139,8 +174,8 @@ class APA:
 
     def umtp_analytical_solution(self, alpha: float = 0.85, beta: float = 0.70, **kw) -> torch.Tensor:
         n_nodes = self.n_nodes
-        theta = (n_nodes-1)*(1-alpha)/alpha/n_nodes
-        lamda = 1/(1-beta)-1/theta
+        theta = (1 - 1/self.n_nodes) * (1/alpha - 1)
+        lamda = (1/beta - 1)/theta
         edge_index, edge_weight = get_laplacian(self.edge_index, num_nodes=n_nodes, normalization="sym")
         L = torch.sparse.FloatTensor(edge_index, values=edge_weight, size=(n_nodes, n_nodes)).to_dense()
         Ik_diag = torch.zeros(n_nodes)
@@ -149,3 +184,53 @@ class APA:
         L1 = torch.eye(n_nodes)*(n_nodes/(n_nodes-1)) - torch.ones(n_nodes, n_nodes)/(n_nodes-1)
         out = torch.mm(torch.inverse(L+lamda*Ik+theta*L1), lamda*torch.mm(Ik, self.out))
         return out
+
+    def umtp_label(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        if out is None:
+            out = self.out
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = alpha*torch.spmm(self.adj, out)+(1-alpha)*((1-gamma)*out.mean(dim=0) + gamma*torch.spmm(self.label_adj, out))
+            out[self.known_mask] = beta*out[self.known_mask] + (1-beta)*self.out_k_init
+        return out * self.std + self.mean
+    
+    def umtp_label_all(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        if out is None:
+            out = self.out
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = alpha*torch.spmm(self.adj, out)+(1-alpha)*((1-gamma)*out.mean(dim=0) + gamma*torch.spmm(self.label_all_adj, out))
+            out[self.known_mask] = beta*out[self.known_mask] + (1-beta)*self.out_k_init
+        return out * self.std + self.mean
+
+
+class UMTPLoss(nn.Module):
+    def __init__(self, edge_index:Adj, raw_x:torch.Tensor, know_mask:torch.Tensor, alpha, beta, **kw):
+        super().__init__()
+        num_nodes = raw_x.size(0)
+        self.n_nodes = num_nodes
+        num_attrs = raw_x.size(1)
+        self.know_mask = know_mask
+        self.x_know = raw_x[know_mask]
+        edge_index, edge_weight = get_laplacian(edge_index, num_nodes=num_nodes, normalization="sym")
+        self.L = torch.sparse.FloatTensor(edge_index, values=edge_weight, size=(num_nodes, num_nodes)).to_dense().to(edge_index.device)
+        self.avg_L = num_nodes/(num_nodes-1)*torch.eye(num_nodes) - 1/(num_nodes-1)*torch.ones(num_nodes, num_nodes)
+        self.x = nn.Parameter(torch.FloatTensor(num_nodes, num_attrs))
+        self.x.data[know_mask] = self.x_know.clone().detach().data
+        if alpha == 0:
+            alpha = 0.00001
+        if beta == 0:
+            beta = 0.00001
+        self.theta = (1 - 1/num_nodes) * (1/alpha - 1)
+        self.lamda = (1/beta - 1)/self.theta
+        print(alpha, beta, self.theta, self.lamda)
+
+    def get_loss(self, x):
+        dirichlet_loss = to_dirichlet_loss(x, self.L)
+        avg_loss = to_dirichlet_loss(x, self.avg_L)
+        recon_loss = nn.functional.mse_loss(x[self.know_mask], self.x_know, reduction="sum")
+        return dirichlet_loss + self.lamda * recon_loss + self.theta * avg_loss
+
+    def forward(self):
+        return self.get_loss(self.x)
+        

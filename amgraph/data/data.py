@@ -170,7 +170,7 @@ def load_data(data_name, split=None, seed=None, verbose=False):
     dat = data.data
 
     node_x = dat.x
-    node_y = dat.y
+    node_y = dat.y.squeeze()
     edges = dat.edge_index
 
     validate_edges(edges)

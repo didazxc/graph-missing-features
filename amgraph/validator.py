@@ -1,7 +1,7 @@
 from .data import data as d
 from .metrics import calc_single_score, greater_is_better, to_acc
 from .utils import SearchPoints, Scores
-from .models.apa import APA
+from .models.apa import APA, UMTPLoss
 from .models.gnn import GNN
 from .models.mlp import MLP
 import logging
@@ -110,7 +110,7 @@ class EstimationValidator:
         return scores
 
     @staticmethod
-    def run(file_name="iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
+    def run(file_name="iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
         scores = Scores(file_name=file_name)
         scores.load()
         for seed in range(10):
@@ -120,7 +120,7 @@ class EstimationValidator:
             torch.backends.cudnn.benchmark = False
             for dataset_name in dataset_names:
                 edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
-                apa = APA(x_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
                 v = EstimationValidator(dataset_name, x_all, trn_nodes, val_nodes, test_nodes, max_num_iter, seed_idx=seed, early_stop=early_stop, k_index=k_index)
                 algos = {
                     'fp':(apa.fp, {"alpha":(0.0, 0.0)}),
@@ -128,7 +128,9 @@ class EstimationValidator:
                     'ppr':(apa.ppr, {"alpha":(0.0, 1.0)}),
                     'mtp':(apa.mtp, {"alpha":(0.0, 1.0)}),
                     'umtp':(apa.umtp, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)}),
-                    'umtp2':(apa.umtp2, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
+                    'umtp2':(apa.umtp2, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
+                    'umtp_label':(apa.umtp_label, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
+                    'umtp_label_all':(apa.umtp_label_all, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
                 }
                 for algo_name in run_algos:
                     if only_val_once:
@@ -147,7 +149,7 @@ class EstimationValidator:
                                     scores.print()
 
     @staticmethod
-    def multi_run(file_name="combine_iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
+    def multi_run(file_name="combine_iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
         file_names = []
         task_list = []
         mp = multiprocessing.get_context('spawn')
@@ -237,7 +239,7 @@ class ClassificationValidator:
 
     def validate_from_scores(self, apa_fn, est_scores: Scores, val_only_once):
         algo_name = apa_fn.__name__
-        convs = ["GCN"]  # ["GCN", "MLP"]
+        convs = ["MLP"]  # ["GCN", "MLP"]
         metrics, ks = ([self.metric], [self.k]) if val_only_once else (self.metrics, self.ks)
         for metric in metrics:
             for k in ks:
@@ -256,7 +258,7 @@ class ClassificationValidator:
         self.scores.print()
 
     @staticmethod
-    def run(file_name="class_all_umtp30", est_scores_file_name="all_umtp30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['raw','fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], val_only_once=True, k_index=0):
+    def run(file_name="class_all_umtp30", est_scores_file_name="all_umtp30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'pubmed', 'cs', 'arxiv'], run_algos=['raw','fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], val_only_once=True, k_index=0):
         est_scores = Scores(file_name=est_scores_file_name)
         est_scores.load()
         scores = Scores(file_name=file_name)
@@ -271,7 +273,7 @@ class ClassificationValidator:
 
             for dataset_name in dataset_names:
                 edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
-                apa = APA(x_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
                 induced_edge_index, _ = subgraph(test_nodes, edge_index)
                 c = ClassificationValidator(scores, dataset_name=dataset_name, edges=induced_edge_index, y_all=y_all, test_nodes=test_nodes, num_attrs=x_all.size(1), num_classes=num_classes, epoches=epoches, seed=seed, seed_idx=seed, k_index=k_index)
                 
@@ -285,13 +287,122 @@ class ClassificationValidator:
                         'ppr':apa.ppr,
                         'mtp':apa.mtp,
                         'umtp':apa.umtp,
-                        'umtp2':apa.umtp2
+                        'umtp2':apa.umtp2,
+                        'umtp_label':apa.umtp_label,
+                        'umtp_label_all':apa.umtp_label_all
                     }
                 for algo_name in run_algos:
                     c.validate_from_scores(algos[algo_name], est_scores, val_only_once)
                 
         scores.print()
         print("end")
+
+
+class SGDValidator:
+
+    @staticmethod
+    def run(file_name="sgd_score", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], k_index=-1, params_range_kw={'alpha':(0.0,1.0), 'beta':(0.0,1.0)}):
+        epochs = 2000
+        scores = Scores(file_name=file_name)
+        scores.load()
+        for seed in range(10):
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            for dataset_name in dataset_names:
+                s = SearchPoints(**params_range_kw)
+                all_metrics, all_ks = EstimationValidator.metric_and_ks(dataset_name)
+                metric, k = all_metrics[k_index], all_ks[k_index]
+                edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
+                
+                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+
+                def fn(point):
+                    umtp = UMTPLoss(edge_index, x_all, trn_nodes, **{tag:p for tag, p in zip(s.tags, point)})
+
+                    x_hat = apa.umtp_analytical_solution(**{tag:p for tag, p in zip(s.tags, point)})
+                    score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
+                    target_loss = umtp.get_loss(x_hat)
+                    print(f"umtp_analytical_solution score={score:7.5f} loss={target_loss:7.5f}")
+                    optimizer = torch.optim.Adam(umtp.parameters(), lr=0.1)
+                    best_score = None
+                    test_score = None
+                    loss10 = []
+                    last_loss10_avg = None
+                    no_improve_count = 0
+                    for epoch in range(epochs):
+                        optimizer.zero_grad()
+                        loss = umtp()
+                        loss.backward()
+                        optimizer.step()
+                        score = calc_single_score(dataset_name, umtp.x, x_all, val_nodes, metric, k)
+                        if best_score is None or (greater_is_better(metric) == (best_score<score)):
+                            best_score = score
+                            test_score = calc_single_score(dataset_name, umtp.x, x_all, test_nodes, metric, k)
+                        if epoch % 20 == 0:
+                            msg = f"seed={seed:2d} dataset_name={dataset_name:8s} metric={metric:5s} epoch={epoch:4d} best_score={best_score:7.5f} test_score={test_score:7.5f} loss={loss:7.5f} score={score:7.5f}"
+                            print(msg)
+                        loss10.append(loss.item())
+                        if len(loss10)==10:
+                            loss10_avg = sum(loss10)/10
+                            loss10.pop(0)
+                            if last_loss10_avg is None or last_loss10_avg>loss10_avg:
+                                no_improve_count = 0
+                                last_loss10_avg = loss10_avg
+                            else:
+                                no_improve_count += 1
+                            if no_improve_count > 10:
+                                break
+                    return best_score, (umtp.x, epoch)
+                
+                s.search(fn, greater_is_better(metric))
+                best_params = {tag:p for tag, p in zip(s.tags, s.best_points[0])}
+                best_x_hat, iter_count = s.best_out[0]
+                best_params['iter_count'] = iter_count
+                
+                for metric in all_metrics:
+                    row = f"{metric}"
+                    for ki in all_ks:
+                        col = f"{dataset_name}@{ki}"
+                        score = calc_single_score(dataset_name, best_x_hat, x_all, test_nodes, metric, ki)
+                        scores.append((row, col, score))
+                    scores.append((row, f"{dataset_name}@{k}_params", best_params))
+            
+            scores.print()
+                
+    def pubmed_sgd_params(epochs=2000, k_index=0):
+        for seed in range(10):
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+            dataset_name = 'pubmed'
+
+            all_metrics, all_ks = EstimationValidator.metric_and_ks(dataset_name)
+            metric, k = all_metrics[k_index], all_ks[k_index]
+            edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
+            apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+            alpha, beta = nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(1.0))
+            
+            loss_fn = nn.MSELoss()
+            optimizer = torch.optim.Adam([alpha, beta], lr=0.1)
+            best_score = None
+            test_score = None
+            for epoch in range(epochs):
+                alpha1, beta1 = torch.sigmoid(alpha), torch.sigmoid(beta)
+                x_hat = apa.umtp_analytical_solution(alpha1, beta1)
+                loss = loss_fn(x_hat[val_nodes],x_all[val_nodes])
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
+                if best_score is None or (greater_is_better(metric)==(score>best_score)):
+                    best_score=score
+                    test_score = calc_single_score(dataset_name, x_hat, x_all, test_nodes, metric, k)
+                print(f"seed={seed:2d} dataset_name={dataset_name:8s} metric={metric:5s} epoch={epoch:4d} best_score={best_score:7.5f} test_score={test_score:7.5f} loss={loss:7.5f} score={score:7.5f} alpha1={alpha1.item():7.5f} beta1={beta1.item():7.5f} {alpha.item():10f} {beta.item():10f}")
+            print(alpha1, beta1, best_score, test_score)
 
 
 def main():
@@ -302,5 +413,7 @@ def main():
     # EstimationValidator.multi_run("combine_k50_le30", max_num_iter=30, early_stop=True, k_index= -1)
     # EstimationValidator.multi_run("combine_k50_eq30", max_num_iter=30, early_stop=False, k_index= -1)
     # ClassificationValidator.run(file_name="class_k10_eq30", est_scores_file_name="combine_k10_eq30")
-    ClassificationValidator.run(file_name="class_all_le30", est_scores_file_name="combine_all_le30", val_only_once=False)
+    # ClassificationValidator.run(file_name="class_k50_le30", est_scores_file_name="combine_k50_le30", val_only_once=False)
+    # ClassificationValidator.run(file_name="class_mlp_k50_le30", est_scores_file_name="combine_k50_le30")
+    SGDValidator.pubmed_sgd_params()
 

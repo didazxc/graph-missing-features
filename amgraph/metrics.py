@@ -52,6 +52,7 @@ def to_r2(input, target):
     return (1 - a / b).item()
 
 
+@torch.no_grad()
 def calc_single_score(dataset_name, x_hat, x_all, nodes, metric, k):
     if d.is_continuous(dataset_name):
         if metric == "CORR":
