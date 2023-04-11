@@ -71,10 +71,10 @@ class Scores:
         cnt = len(self.dict[col][row]) if col in self.dict and row in self.dict[col] else 0
         return cnt > idx
 
-    def print(self):
+    def print(self, reduction='mean'):
         self.save()
         df_dict = {col: {
-            row: np.mean(row_v) if isinstance(row_v, list) and all([isinstance(v, numbers.Number) for v in row_v]) else row_v
+            row: np.mean(row_v) if isinstance(row_v, list) and all([isinstance(v, numbers.Number) for v in row_v]) and reduction=='mean' else row_v
             for row, row_v in col_v.items()
         } for col, col_v in self.dict.items()}
         df = pd.DataFrame(df_dict)
