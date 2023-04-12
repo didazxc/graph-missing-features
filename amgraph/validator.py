@@ -303,44 +303,54 @@ class SGDValidator:
     @staticmethod
     def compare(dataset_name, apa:APA, val_nodes, params, metric, k, epochs):
         s = Scores("compare_rate")
+        s.load()
 
         edge_index, x_all, trn_nodes = apa.edge_index, apa.x, apa.know_mask
         umtp = UMTPLoss(edge_index, x_all, trn_nodes, is_binary=apa.is_binary, **params)
-        
+
         # analytical_solution
         x_hat = apa.umtp_analytical_solution(**params)
-        score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
-        loss = umtp.get_loss(x_hat)
-        print(f"umtp_analytical_solution score={score:7.5f} loss={loss:7.5f}, metric={metric}, k={k}")
-        s.add_score("analytical_solution",dataset_name,loss)
-        s.add_score("analytical_solution",dataset_name,score)
-
-        # prop
-        out = None
-        for epoch in range(epochs):
-            out = apa.umtp(out,**params)
-            score = calc_single_score(dataset_name, out, x_all, val_nodes, metric, k)
-            loss = umtp.get_loss(out)
-            mse = torch.nn.functional.mse_loss(x_hat, out, reduction='sum')
-            print(f"prop epoch={epoch}, loss={loss}, mse={mse}, score={score}")
-            s.add_score("prop_loss",dataset_name,loss)
-            s.add_score("prop_mse",dataset_name,mse)
-        print(f"end prop at epoch={epoch}")
-
-        # sgd
-        optimizer = torch.optim.Adam(umtp.parameters(), lr=0.01)
-        for epoch in range(epochs):
-            optimizer.zero_grad()
-            loss = umtp()
-            loss.backward()
-            optimizer.step()
-            score = calc_single_score(dataset_name, umtp.get_out(), x_all, val_nodes, metric, k)
-            mse = torch.nn.functional.mse_loss(x_hat, umtp.get_out(), reduction='sum')
-            s.add_score("sgd_loss",dataset_name,loss)
-            s.add_score("sgd_mse",dataset_name,mse)
-            print(f"sgd epoch={epoch}, loss={loss}, mse={mse}, score={score}")
+        if not s.has_value("analytical_solution_score",dataset_name,0):
+            score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
+            loss = umtp.get_loss(x_hat)
+            s.add_score("analytical_solution_loss",dataset_name,loss.item())
+            s.add_score("analytical_solution_score",dataset_name,score)
+            print(f"umtp_analytical_solution score={score:7.5f} loss={loss:7.5f}, metric={metric}, k={k}")
+            s.save()
+        if not s.has_value("prop_mse",dataset_name,epochs-1):
+            # prop
+            out = None
+            for epoch in range(epochs):
+                if epoch == 0:
+                    out = apa.out
+                else:
+                    out = apa.umtp(out,**params)
+                score = calc_single_score(dataset_name, out, x_all, val_nodes, metric, k)
+                loss = umtp.get_loss(out)
+                mse = torch.nn.functional.mse_loss(x_hat, out, reduction='sum')
+                s.add_score("prop_score",dataset_name,score)
+                s.add_score("prop_loss",dataset_name,loss.item())
+                s.add_score("prop_mse",dataset_name,mse.item())
+                print(f"prop epoch={epoch}, loss={loss}, mse={mse}, score={score}")
+            s.save()
+            print(f"end prop at epoch={epoch}")
+        if not s.has_value("sgd_mse",dataset_name,epochs-1):
+            # sgd
+            optimizer = torch.optim.Adam(umtp.parameters(), lr=0.01)
+            for epoch in range(epochs):
+                optimizer.zero_grad()
+                loss = umtp()
+                loss.backward()
+                optimizer.step()
+                score = calc_single_score(dataset_name, umtp.get_out(), x_all, val_nodes, metric, k)
+                mse = torch.nn.functional.mse_loss(x_hat, umtp.get_out(), reduction='sum')
+                s.add_score("sgd_score",dataset_name,score)
+                s.add_score("sgd_loss",dataset_name,loss.item())  # before backward
+                s.add_score("sgd_mse",dataset_name,mse.item())
+                print(f"sgd epoch={epoch}, loss={loss}, mse={mse}, score={score}")
+            s.save()
+            print(f"end sgd at epoch={epoch}")
         s.print('raw')
-        s.save()
 
     @staticmethod
     def sgd(file_name="sgd_score", dataset_names = ['pubmed'], k_index=-1, params_range_kw={'alpha':(0.0,1.0), 'beta':(0.0,1.0)}):
@@ -391,7 +401,7 @@ class SGDValidator:
             scores.print()
     
     @staticmethod
-    def run_compare(dataset_names = ['pubmed', 'cs', 'arxiv'], k_index=-1, epochs=200):
+    def run_compare(dataset_names = ['pubmed', 'cs', 'arxiv'], k_index=-1, epochs=120):
         params_dict = {
             'pubmed': {'alpha':1.0, 'beta':0.625},
             'cs': {'alpha':1.0, 'beta':0.0859375},
