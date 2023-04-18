@@ -110,17 +110,17 @@ class EstimationValidator:
         return scores
 
     @staticmethod
-    def run(file_name="iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
+    def run(file_name="iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label_25','umtp_label', 'umtp_label_75', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
         scores = Scores(file_name=file_name)
         scores.load()
-        for seed in range(10):
+        for seed in range(1):
             np.random.seed(seed)
             torch.manual_seed(seed)
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
             for dataset_name in dataset_names:
                 edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
-                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name), seed=seed)
                 v = EstimationValidator(dataset_name, x_all, trn_nodes, val_nodes, test_nodes, max_num_iter, seed_idx=seed, early_stop=early_stop, k_index=k_index)
                 algos = {
                     'fp':(apa.fp, {"alpha":(0.0, 0.0)}),
@@ -129,7 +129,9 @@ class EstimationValidator:
                     'mtp':(apa.mtp, {"alpha":(0.0, 1.0)}),
                     'umtp':(apa.umtp, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0)}),
                     'umtp2':(apa.umtp2, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
+                    'umtp_label_25':(apa.umtp_label_25, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label':(apa.umtp_label, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
+                    'umtp_label_75':(apa.umtp_label_75, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label_all':(apa.umtp_label_all, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
                 }
                 for algo_name in run_algos:
@@ -149,7 +151,7 @@ class EstimationValidator:
                                     scores.print()
 
     @staticmethod
-    def multi_run(file_name="combine_iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
+    def multi_run(file_name="combine_iter_le_30", dataset_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'], run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2', 'umtp_label_25','umtp_label', 'umtp_label_75', 'umtp_label_all'], max_num_iter = 30, only_val_once=True, early_stop=True, k_index=0):
         file_names = []
         task_list = []
         mp = multiprocessing.get_context('spawn')
@@ -163,6 +165,31 @@ class EstimationValidator:
             p.join()
         s = Scores(file_name)
         s.combine(file_names).print()
+
+    @staticmethod
+    def early_stop(dataset_name='pubmed', metric='CORR', k=50, params_kw={'alpha':0.9921875, 'beta':0.90625}):
+        seed = 0
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
+        apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name), seed=seed)
+        
+        best_score = None
+        best_test_score = None
+        best_num_iter = 0
+        x_hat = None
+        print(f"epoch curr_score test_score best_num_iter best_score best_test_score")
+        for iter_i in range(1, 100):
+            x_hat = apa.fp(x_hat,**params_kw)
+            curr_score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
+            test_score = calc_single_score(dataset_name, x_hat, x_all, test_nodes, metric, k)
+            if  (best_score is None or greater_is_better(metric) == (curr_score>best_score)):
+                best_score = curr_score
+                best_test_score = test_score
+                best_num_iter=iter_i
+            print(f"{iter_i:{len('epoch')}d} {curr_score:{len('curr_score')}.4f} {test_score:{len('test_score')}.4f} {best_num_iter:{len('best_num_iter')}d} {best_score:{len('best_score')}.4f} {best_test_score:{len('best_test_score')}.4f}")
 
 
 class ClassificationValidator:
@@ -477,6 +504,9 @@ def main():
     # EstimationValidator.multi_run("combine_k50_eq30", max_num_iter=30, early_stop=False, k_index= -1)
     # ClassificationValidator.run(file_name="class_k10_eq30", est_scores_file_name="combine_k10_eq30")
     # ClassificationValidator.run(file_name="class_k50_le30", est_scores_file_name="combine_k50_le30", val_only_once=False)
+    # ClassificationValidator.run(file_name="class_mlp_k50_eq30", est_scores_file_name="combine_k50_eq30", run_algos=["fp"])
     # ClassificationValidator.run(file_name="class_mlp_k50_le30", est_scores_file_name="combine_k50_le30")
-    SGDValidator.run_compare()
-
+    # SGDValidator.run_compare()
+    # EstimationValidator.early_stop()
+    EstimationValidator.multi_run("label_k50_le30", max_num_iter=30, early_stop=True, k_index= -1, run_algos=['umtp', 'umtp_label_25','umtp_label', 'umtp_label_75', 'umtp_label_all'])
+    

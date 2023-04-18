@@ -1,5 +1,6 @@
 from collections import defaultdict
 from itertools import permutations
+import random
 import torch
 from torch import nn
 from torch_scatter import scatter_add
@@ -51,19 +52,33 @@ def get_edge_index_from_y(y: torch.Tensor, know_mask: torch.Tensor = None) -> Ad
     return torch.tensor(arr, dtype=torch.long).T
 
 
+def get_edge_index_from_y_ratio(y: torch.Tensor, ratio: float = 1.0) -> Adj:
+    n = y.size(0)
+    nodes = defaultdict(list)
+    for idx, label in random.sample(list(enumerate(y.numpy())), int(ratio*n)):
+        nodes[label].append(idx)
+    arr = []
+    for v in nodes.values():
+        arr += list(permutations(v, 2))
+    return torch.tensor(arr, dtype=torch.long).T
+
+
 def to_dirichlet_loss(attrs, laplacian):
     return torch.bmm(attrs.t().unsqueeze(1), laplacian.matmul(attrs).t().unsqueeze(2)).view(-1).sum()
 
 
 class APA:
 
-    def __init__(self, x: torch.Tensor, y: torch.Tensor, edge_index: Adj, know_mask: torch.Tensor, is_binary: bool, out_init=None):
+    def __init__(self, x: torch.Tensor, y: torch.Tensor, edge_index: Adj, know_mask: torch.Tensor, is_binary: bool, out_init=None, seed=None):
+        self.seed = seed
         self.x = x
         self.y = y
         self.n_nodes = x.size(0)
         self.edge_index = edge_index
         self._adj = None
+        self._label_adj_25 = None
         self._label_adj = None
+        self._label_adj_75 = None
         self._label_all_adj = None
         self.know_mask = know_mask
         self.is_binary = is_binary
@@ -90,6 +105,20 @@ class APA:
             self._label_adj = get_propagation_matrix(edge_index, self.n_nodes)
         return self._label_adj
     
+    @property
+    def label_adj_25(self):
+        if self._label_adj_25 is None:
+            edge_index = get_edge_index_from_y_ratio(self.y, 0.25)
+            self._label_adj_25 = get_propagation_matrix(edge_index, self.n_nodes)
+        return self._label_adj_25
+
+    @property
+    def label_adj_75(self):
+        if self._label_adj_75 is None:
+            edge_index = get_edge_index_from_y_ratio(self.y, 0.75)
+            self._label_adj_75 = get_propagation_matrix(edge_index, self.n_nodes)
+        return self._label_adj_75
+
     @property
     def label_all_adj(self):
         if self._label_all_adj is None:
@@ -199,12 +228,30 @@ class APA:
         out = torch.mm(torch.inverse(L+eta*Ik+theta*L1), eta*torch.mm(Ik, out))
         return out * self.std + self.mean
 
+    def umtp_label_25(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        if out is None:
+            out = self.out
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = alpha*torch.spmm(self.adj, out)+(1-alpha)*((1-gamma)*out.mean(dim=0) + gamma*torch.spmm(self.label_adj_25, out))
+            out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
+        return out * self.std + self.mean
+
     def umtp_label(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         if out is None:
             out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = alpha*torch.spmm(self.adj, out)+(1-alpha)*((1-gamma)*out.mean(dim=0) + gamma*torch.spmm(self.label_adj, out))
+            out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
+        return out * self.std + self.mean
+
+    def umtp_label_75(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        if out is None:
+            out = self.out
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = alpha*torch.spmm(self.adj, out)+(1-alpha)*((1-gamma)*out.mean(dim=0) + gamma*torch.spmm(self.label_adj_75, out))
             out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
         return out * self.std + self.mean
 
