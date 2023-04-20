@@ -1,7 +1,7 @@
 from .data import data as d
 from .metrics import calc_single_score, greater_is_better, to_acc
 from .utils import SearchPoints, Scores
-from .models.apa import APA, UMTPLoss
+from .models.apa import APA, UMTPLoss, UMTPwithParams
 from .models.gnn import GNN
 from .models.mlp import MLP
 import logging
@@ -42,6 +42,7 @@ class EstimationValidator:
         else:
             all_ks = [3, 5, 10] if dataset_name.startswith("steam") else [10, 20, 50]
             all_metrics = ["Recall", "nDCG"]
+        all_ks = [10]
         return all_metrics, all_ks
 
     @staticmethod
@@ -120,7 +121,7 @@ class EstimationValidator:
             torch.backends.cudnn.benchmark = False
             for dataset_name in dataset_names:
                 edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
-                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name), seed=seed)
+                apa = APA(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
                 v = EstimationValidator(dataset_name, x_all, trn_nodes, val_nodes, test_nodes, max_num_iter, seed_idx=seed, early_stop=early_stop, k_index=k_index)
                 algos = {
                     'fp':(apa.fp, {"alpha":(0.0, 0.0)}),
@@ -131,6 +132,7 @@ class EstimationValidator:
                     'umtp2':(apa.umtp2, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label_25':(apa.umtp_label_25, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label':(apa.umtp_label, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
+                    'umtp_label_50':(apa.umtp_label_50, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label_75':(apa.umtp_label_75, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)}),
                     'umtp_label_all':(apa.umtp_label_all, {"alpha":(0.0, 1.0), "beta":(0.0, 1.0), "gamma":(0.0, 1.0)})
                 }
@@ -451,7 +453,7 @@ class SGDValidator:
                 SGDValidator.compare(dataset_name, apa, val_nodes, params, metric, k, epochs)
  
     @staticmethod
-    def sgd_params_search(dataset_names = ['cora'], epochs=2000, k_index=-1):
+    def sgd_params_search(dataset_names = ['pubmed'], epochs=2000, k_index=-1):
         for seed in range(1):
             np.random.seed(seed)
             torch.manual_seed(seed)
@@ -475,7 +477,7 @@ class SGDValidator:
 
                 for epoch in range(epochs):
                     alpha1, beta1 = torch.sigmoid(alpha), torch.sigmoid(beta)
-                    x_hat = apa.umtp_analytical_solution(alpha1, beta1)
+                    x_hat = apa.umtp(alpha=alpha1, beta=beta1, num_iter=30)
                     loss = loss_fn(x_hat[val_nodes],x_all[val_nodes])
                     optimizer.zero_grad()
                     loss.backward()
@@ -494,6 +496,48 @@ class SGDValidator:
                         break
                 print(epoch-30, alpha1.item(), beta1.item(), best_score, test_score_str)
 
+    @staticmethod
+    def sgd_params_vector(dataset_names = ['pubmed'], epochs=2000, k_index=-1):
+        for seed in range(1):
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+            for dataset_name in dataset_names:
+
+                all_metrics, all_ks = EstimationValidator.metric_and_ks(dataset_name)
+                metric, k = all_metrics[k_index], all_ks[k_index]
+                edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
+                umtp = UMTPwithParams(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+
+                loss_fn = nn.MSELoss()
+                optimizer = torch.optim.Adam(umtp.parameters(), lr=0.05)
+                best_score = None
+                test_score = None
+
+                no_improve_count = 0
+
+                for epoch in range(epochs): 
+                    x_hat = umtp()
+                    loss = loss_fn(x_hat[val_nodes],x_all[val_nodes])
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
+                    if best_score is None or (greater_is_better(metric)==(score>best_score)):
+                        best_score=score
+                        test_score = [calc_single_score(dataset_name, x_hat, x_all, test_nodes, metric, k) for k in all_ks]
+                        test_score_str = ','.join([f"{s:7.5f}" for s in test_score])
+                        no_improve_count = 0
+                    else:
+                        no_improve_count += 1
+                    print(f"seed={seed:2d} dataset_name={dataset_name:8s} metric={metric:5s} epoch={epoch:4d} best_score={best_score:7.5f} test_score=({test_score_str}) loss={loss:7.5f} score={score:7.5f}")
+                    
+                    if no_improve_count >= 30:
+                        break
+                print(epoch-30, best_score, test_score_str)
+
 
 def main():
     # EstimationValidator.multi_run("combine_all_le30", max_num_iter=30, early_stop=True, only_val_once= False)
@@ -508,5 +552,7 @@ def main():
     # ClassificationValidator.run(file_name="class_mlp_k50_le30", est_scores_file_name="combine_k50_le30")
     # SGDValidator.run_compare()
     # EstimationValidator.early_stop()
-    EstimationValidator.multi_run("label_k50_le30", max_num_iter=30, early_stop=True, k_index= -1, run_algos=['umtp', 'umtp_label_25','umtp_label', 'umtp_label_75', 'umtp_label_all'])
+    # EstimationValidator.multi_run("label_k10_le30", max_num_iter=30, early_stop=True, k_index= -1, dataset_names=['cora', 'computers'] ,run_algos=['umtp', 'umtp_label_25','umtp_label_50', 'umtp_label_75', 'umtp_label_all'])
+    SGDValidator.sgd_params_search()
+    # SGDValidator.sgd_params_vector()
     
