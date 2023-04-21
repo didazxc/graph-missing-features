@@ -114,13 +114,17 @@ class APA:
     
     def label_adj_25(self):
         if self._label_adj_25 is None:
-            edge_index, self._label_mask_25 = get_edge_index_from_y_ratio(self.y, 0.25)
+            _, label_mask_50 = self.label_adj_50()
+            self._label_mask_25 = torch.tensor(random.sample(label_mask_50.tolist(), int(0.5*label_mask_50.size(0))),dtype=torch.long)
+            edge_index = get_edge_index_from_y(self.y, self._label_mask_25)
             self._label_adj_25 = get_propagation_matrix(edge_index, self.n_nodes)
         return self._label_adj_25, self._label_mask_25
 
     def label_adj_50(self):
         if self._label_adj_50 is None:
-            edge_index, self._label_mask_50 = get_edge_index_from_y_ratio(self.y, 0.5)
+            _, label_mask_75 = self.label_adj_75()
+            self._label_mask_50 = torch.tensor(random.sample(label_mask_75.tolist(), int(0.75*label_mask_75.size(0))),dtype=torch.long)
+            edge_index = get_edge_index_from_y(self.y, self._label_mask_50)
             self._label_adj_50 = get_propagation_matrix(edge_index, self.n_nodes)
         return self._label_adj_50, self._label_mask_50
 
@@ -267,12 +271,21 @@ class APA:
         adj,mask=self.label_adj_75()
         return self._umtp_label(adj,mask,out,alpha,beta,gamma,num_iter)
 
-    def umtp_label_all(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label_100(self, out: torch.Tensor = None, alpha: float = 1.0, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         if out is None:
             out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = gamma*(alpha*torch.spmm(self.adj, out)+(1-alpha)*out.mean(dim=0)) + (1-gamma)*torch.spmm(self.label_adj_all, out)
+            out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
+        return out * self.std + self.mean
+    
+    def umtp_label_all(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        if out is None:
+            out = self.out
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = gamma*torch.spmm(self.adj, out) + (1-gamma)*torch.spmm(self.label_adj_all, out)
             out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
         return out * self.std + self.mean
 
