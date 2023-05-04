@@ -66,6 +66,8 @@ def calc_single_score(dataset_name, x_hat, x_all, nodes, metric, k):
             return to_ndcg(x_hat[nodes], x_all[nodes], k=k)
         elif metric == "Recall":
             return to_recall(x_hat[nodes], x_all[nodes], k=k)
+        elif metric == "CORR":
+            return to_r2(x_hat[nodes], x_all[nodes])
         else:
             raise Exception(f"no this metric {metric}")
 

@@ -6,6 +6,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import torch
+from torch_geometric.typing import Adj
 from torch_geometric.utils import to_undirected
 from torch_geometric.datasets import Planetoid, Amazon, Coauthor
 import scipy.sparse as sp
@@ -138,7 +139,24 @@ def load_steam(root, threshold: float = 10.0):
     return Namespace(data=Namespace(x=features, y=labels, edge_index=edge_index), num_classes=1)
 
 
-def load_data(data_name, split=None, seed=None, verbose=False):
+class Dataset:
+
+    def __init__(self, data_name: str, edges: Adj, x: torch.Tensor, y: torch.Tensor, trn_mask: torch.Tensor, val_mask: torch.Tensor, test_mask: torch.Tensor, num_classes: int):
+        self.data_name = data_name
+        self.edges = edges
+        self.x = x
+        self.y = y
+        self.trn_mask = trn_mask
+        self.val_mask = val_mask
+        self.test_mask = test_mask
+        self.num_classes = num_classes
+        self.num_nodes = x.size(0)
+        self.num_attrs = x.size(1) if len(x.size()) > 1 else 1
+        self.is_binary = is_binary(data_name)
+        self.is_continuous = is_continuous(data_name)
+
+
+def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
     if data_name == 'steam':
         data = load_steam(root)
@@ -208,7 +226,8 @@ def load_data(data_name, split=None, seed=None, verbose=False):
         print()
 
     # return data
-    return edges, node_x, node_y, trn_nodes, val_nodes, test_nodes, data.num_classes
+    return Dataset(data_name=data_name, edges=edges, x=node_x, y=node_y, trn_mask=trn_nodes, val_mask=val_nodes,
+                   test_mask=test_nodes, num_classes=data.num_classes)
 
 
 if __name__ == '__main__':

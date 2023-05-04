@@ -65,11 +65,11 @@ def draw_spectral(data_name, x, edge_index):
 def main():
     need_draw_spring = False
     need_draw_spectral = False
-    # data_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'steam20', 'steam1', 'pubmed', 'cs', 'arxiv']
-    data_names = [ 'cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
+    data_names = ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
     print(f'{"":10s} nodes_num edges_num attrs_num homophily num_components assortativity density attr_sparsity')
     for data_name in data_names:
-        edges, node_x, *_ = load_data(data_name, split=(0.4, 0.1, 0.5), seed=0)
+        data = load_data(data_name, split=(0.4, 0.1, 0.5), seed=0)
+        edges, node_x = data.edges, data.x
         print(f'{data_name:10s} {node_x.size(0):{len("nodes_num")}d} {edges.size(1):{len("edges_num")}d} {node_x.size(1):{len("attrs_num")}d} {homophily(node_x, edges):{len("homophily")}d} {num_components(node_x, edges):{len("num_components")}d} {assortativity(edges):{len("assortativity")}.4f} {density(node_x, edges):{len("density")}.4f} {attr_sparsity(node_x):{len("attr_sparsity")}.4f}')
         if need_draw_spring:
             draw(data_name, x=node_x, edge_index=edges)
