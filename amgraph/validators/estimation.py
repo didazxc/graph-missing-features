@@ -1,7 +1,7 @@
 from ..data import data as d
 from ..metrics import calc_single_score, greater_is_better
 from ..utils import SearchPoints, Scores
-from ..models.apa import APA
+from ..models.apa import APA, UMTPLabel
 import logging
 import numpy as np
 import torch
@@ -33,8 +33,12 @@ class EstDataset:
             all_metrics = ["Recall", "nDCG"]
         return all_metrics, all_ks
 
-    def score(self, x_hat, mask_name='val'):
-        return calc_single_score(self.data.data_name, x_hat, self.data.x, self.data_mask_names[mask_name], self.metric, self.k)
+    def score(self, x_hat, mask_name='val', metric=None, k=None):
+        if k is None:
+            k = self.k
+        if metric is None:
+            metric = self.metric
+        return calc_single_score(self.data.data_name, x_hat, self.data.x, self.data_mask_names[mask_name], metric, k)
 
 
 class EstimationValidator:
@@ -99,10 +103,10 @@ class EstimationValidator:
         for metric in self.dataset.all_metrics:
             row = f"{metric}_{algo_name}"
             for k in self.dataset.all_ks:
-                col = f"{self.dataset_name}@{k}"
+                col_name = f"{self.dataset_name}@{k}"
                 for data_mask_name in self.dataset.data_mask_names:
-                    score = self.dataset.score(best_x_hat, data_mask_name)
-                    col = col if data_mask_name == 'tst' else f"{col}_{data_mask_name}"
+                    score = self.dataset.score(best_x_hat, data_mask_name, metric=metric, k=k)
+                    col = col_name if data_mask_name == 'tst' else f"{col_name}_{data_mask_name}"
                     scores.append((row, col, score))
                 scores.append((row, f"{self.dataset_name}@{k}_params", best_params))
         return scores
@@ -112,10 +116,10 @@ class EstimationValidator:
         algo_name = apa_fn.__name__
         best_params, best_x_hat = self._search_best(apa_fn, params_range_kw=params_range_kw, metric=metric, k=k)
         row = f"{metric}_{algo_name}"
-        col = f"{self.dataset_name}@{k}"
+        col_name = f"{self.dataset_name}@{k}"
         for data_mask_name in self.dataset.data_mask_names:
-            score = self.dataset.score(best_x_hat, data_mask_name)
-            col = col if data_mask_name == 'tst' else f"{col}_{data_mask_name}"
+            score = self.dataset.score(best_x_hat, data_mask_name, metric=metric, k=k)
+            col = col_name if data_mask_name == 'tst' else f"{col_name}_{data_mask_name}"
             scores.append((row, col, score))
         scores.append((row, f"{self.dataset_name}@{k}_params", best_params))
         return scores
@@ -134,15 +138,25 @@ class EstimationValidator:
             torch.backends.cudnn.benchmark = False
             for dataset_name in dataset_names:
                 data = EstDataset(dataset_name, split=(0.4, 0.1, 0.5), seed=seed, max_num_iter=max_num_iter, min_num_iter=1, k_index=k_index, early_stop=early_stop)
-                apa = APA(data.data.edges, data.data.x, data.data.trn_mask, data.data.is_binary)
+                apa = APA(data.data.edges, data.data.x, data.data.trn_mask, data.data.is_binary, data.data.is_continuous)
+                umtp = UMTPLabel(data.data.edges, data.data.x, data.data.y, data.data.trn_mask, data.data.is_binary)
+                print('unlabel_mask', dataset_name, seed, len(apa._unlearn_mask))
                 v = EstimationValidator(data)
                 algos = {
                     'fp': (apa.fp, {"alpha": (0.0, 0.0)}),
                     'pr': (apa.pr, {"alpha": (0.0, 1.0)}),
                     'ppr': (apa.ppr, {"alpha": (0.0, 1.0)}),
-                    'mtp': (apa.mtp, {"alpha": (0.0, 1.0)}),
+                    'mtp': (apa.mtp, {"beta": (0.0, 1.0)}),
+                    'mtp_partial': (apa.mtp_partial, {"beta": (0.0, 1.0)}),
+                    'umtp_beta': (apa.umtp_beta, {"beta": (0.0, 1.0)}),
                     'umtp': (apa.umtp, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0)}),
-                    'umtp2': (apa.umtp2, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0), "gamma": (0.0, 1.0)})
+                    'umtp2': (apa.umtp2, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label': (umtp.umtp_label, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label_25': (umtp.umtp_label_25, {"beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label_50': (umtp.umtp_label_50, {"beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label_75': (umtp.umtp_label_75, {"beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label_100': (umtp.umtp_label_100, {"beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
+                    'umtp_label_all': (umtp.umtp_label_all, {"beta": (0.0, 1.0), "gamma": (0.0, 1.0)})
                 }
                 for algo_name in run_algos:
                     if only_val_once:
@@ -166,8 +180,8 @@ class EstimationValidator:
     @staticmethod
     def multi_run(file_name="combine_iter_le_30",
                   dataset_names=['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'],
-                  run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], max_num_iter=30, only_val_once=True,
-                  early_stop=True, k_index=0):
+                  run_algos=['fp', 'pr', 'ppr', 'mtp', 'mtp_partial', 'umtp', 'umtp2'], max_num_iter=30,
+                  only_val_once=True, early_stop=True, k_index=0):
         file_names = []
         task_list = []
         mp = multiprocessing.get_context('spawn')

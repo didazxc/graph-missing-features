@@ -21,23 +21,47 @@ class PathTest:
                 x_hat = apa_fn(x_hat, **dict(zip(tags, point)))
                 curr_score = score_fn(x_hat)
                 scores.append(curr_score)
-            res[','.join(point)] = scores
+            res[','.join([str(i) for i in point])] = scores
         return pd.DataFrame(res)
 
     @staticmethod
-    def params_robust(dataset_name='cora'):
+    def scores_web_df(points, num_iter, apa_fn, score_fn) -> pd.DataFrame:
+        tags = ['alpha', 'beta']
+        res: dict = {}
+        for point in points:
+            scores = []
+            x_hat = None
+            for iter_i in range(0, num_iter):
+                x_hat = apa_fn(x_hat, **dict(zip(tags, point)))
+                curr_score = score_fn(x_hat)
+                scores.append(curr_score)
+            if point[1] not in res:
+                res[point[1]] = {}
+            res[point[1]].update({point[0]: max(scores), f"{point[0]}_end": scores[-1]})
+        return pd.DataFrame(res)
+
+    @staticmethod
+    def params_robust(datasets=['cora', 'citeseer', 'computers', 'photo', 'pubmed', 'cs', 'arxiv']):
         seed = 0
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        est_dataset = EstDataset(dataset_name, (0.4, 0.1, 0.5), seed, max_num_iter=30, min_num_iter=1, k_index=-1,
-                                 early_stop=False)
-        est_dataset.metric = "CORR"
-        apa = APA(est_dataset.data.edges, est_dataset.data.x, est_dataset.data.trn_mask, est_dataset.data.is_binary)
-        df = PathTest.score_paths([i/100 for i in range(0, 101)], 30, apa.pr, est_dataset.score)
-        print(df)
-        df.to_csv('params_robust_test')
+        for dataset_name in datasets:
+            est_dataset = EstDataset(dataset_name, (0.4, 0.1, 0.5), seed, max_num_iter=30, min_num_iter=1, k_index=-1, early_stop=False)
+            apa = APA(est_dataset.data.edges, est_dataset.data.x, est_dataset.data.trn_mask, est_dataset.data.is_binary)
+            # df = PathTest.score_paths([(i/100,) for i in range(0, 101)], 30, apa.pr, est_dataset.score)
+            # df = PathTest.score_paths([(0.85, i / 100) for i in range(0, 101)], 30, apa.mtp, est_dataset.score)
+            # df = PathTest.score_paths([(0.85+(i-2)*0.05, 0.85+(j-5)*0.025,) for i in range(0, 5) for j in range(0,10)], 30, apa.mtp, est_dataset.score)
+            # df = PathTest.scores_web_df([(0.9 + i / 200, j / 20) for i in range(0, 21) for j in range(0, 21)], 30, apa.umtp, est_dataset.score)
+            beta = 0.95
+            if dataset_name == 'computers':
+                beta = 0.2
+            df = PathTest.score_paths(
+                [(0.90 + i/1000, beta,) for i in range(0, 100)], 30,
+                apa.umtp, est_dataset.score)
+            print(df)
+            df.to_csv(f'params_robust_umtp_alpha_{dataset_name}')
 
     @staticmethod
     def params_consistency(dataset_name='cora', metric='CORR', k=50,

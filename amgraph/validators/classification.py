@@ -140,7 +140,8 @@ class ClassificationValidator:
                     'ppr': apa.ppr,
                     'mtp': apa.mtp,
                     'umtp': apa.umtp,
-                    'umtp2': apa.umtp2
+                    'umtp2': apa.umtp2,
+                    'umtp_beta': apa.umtp_beta
                 }
                 for algo_name in run_algos:
                     c.validate_from_scores(algos[algo_name], est_scores, val_only_once)

@@ -70,17 +70,27 @@ def to_dirichlet_loss(attrs, laplacian):
 
 
 class APA:
-    def __init__(self, edge_index: Adj, x: torch.Tensor, know_mask: torch.Tensor, is_binary: bool):
+    def __init__(self, edge_index: Adj, x: torch.Tensor, know_mask: torch.Tensor, is_binary: bool, is_connect: bool=False):
         self.edge_index = edge_index
         self.x = x
         self.n_nodes = x.size(0)
         self.know_mask = know_mask
+        self.is_connect = is_connect
         self.mean = 0 if is_binary else x[know_mask].mean(dim=0)
         self.std = 1  # if is_binary else x[know_mask].std(dim=0)
         self.out_k_init = (self.x[self.know_mask] - self.mean) / self.std
         self.out = torch.zeros_like(self.x)
         self.out[self.know_mask] = self.x[self.know_mask]
         self._adj = None
+        self._unlearn_mask = self._unlearn_mask()
+
+    def _unlearn_mask(self):
+        num_iter = 30
+        out = torch.zeros(self.n_nodes, 1)
+        out[self.know_mask] = 1
+        for _ in range(num_iter):
+            out = torch.spmm(self.adj, out)
+        return torch.nonzero(out == 0, as_tuple=True)[0]
 
     @property
     def adj(self):
@@ -90,7 +100,7 @@ class APA:
 
     def fp(self, out: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
@@ -117,19 +127,19 @@ class APA:
 
         return out * self.std + self.mean
 
-    def pr(self, out: torch.Tensor = None, alpha: float = 0.85, num_iter: int = 1, **kw) -> torch.Tensor:
+    def pr(self, out: torch.Tensor = None, alpha: float = 0.999, num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = alpha * torch.spmm(self.adj, out) + (1 - alpha) * out.mean(dim=0)
             out[self.know_mask] = self.out_k_init
         return out * self.std + self.mean
 
-    def ppr(self, out: torch.Tensor = None, alpha: float = 0.85, weight: torch.Tensor = None, num_iter: int = 1,
+    def ppr(self, out: torch.Tensor = None, alpha: float = 0.999, weight: torch.Tensor = None, num_iter: int = 1,
             **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         if weight is None:
             weight = self.mean
@@ -138,16 +148,28 @@ class APA:
             out[self.know_mask] = self.out_k_init
         return out * self.std + self.mean
 
-    def mtp(self, out: torch.Tensor = None, beta: float = 0.85, num_iter: int = 1, **kw) -> torch.Tensor:
+    def mtp_partial(self, out: torch.Tensor = None, beta: float = 0.999, num_iter: int = 1, **kw) -> torch.Tensor:
+        # 相比mtp，将未学到信息的点属性直接填充为有信息点属性的均值
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = torch.spmm(self.adj, out)
+            out[self._unlearn_mask] = out[~self._unlearn_mask].mean(dim=0)
+            out[self.know_mask] = beta * out[self.know_mask] + (1 - beta) * self.out_k_init
+        out = out * self.std + self.mean
+        return out
+
+    def mtp(self, out: torch.Tensor = None, beta: float = 0.999, num_iter: int = 1, **kw) -> torch.Tensor:
+        if out is None:
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
             out[self.know_mask] = beta * out[self.know_mask] + (1 - beta) * self.out_k_init
         return out * self.std + self.mean
 
-    def mtp_analytical_solution(self, beta: float = 0.85, **kw) -> torch.Tensor:
+    def mtp_analytical_solution(self, beta: float = 0.999, **kw) -> torch.Tensor:
         n_nodes = self.n_nodes
         eta = (1 / beta - 1)
         edge_index, edge_weight = get_laplacian(self.edge_index, num_nodes=n_nodes, normalization="sym")
@@ -159,27 +181,37 @@ class APA:
         out = torch.mm(torch.inverse(L + eta * Ik), eta * torch.mm(Ik, out))
         return out * self.std + self.mean
 
-    def umtp(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, num_iter: int = 1,
+    def umtp(self, out: torch.Tensor = None, alpha: float = 0.999, beta: float = 0.70, num_iter: int = 1,
              **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = alpha * torch.spmm(self.adj, out) + (1 - alpha) * out.mean(dim=0)
             out[self.know_mask] = beta * out[self.know_mask] + (1 - beta) * self.out_k_init
         return out * self.std + self.mean
 
-    def umtp2(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma: float = 0.75,
+    def umtp_beta(self, out: torch.Tensor = None, beta: float = 0.70, num_iter: int = 1, **kw) -> torch.Tensor:
+        alpha: float = 1.0 if self.is_connect else 0.999
+        if out is None:
+            out = self.out.clone().detach()
+        out = (out - self.mean) / self.std
+        for _ in range(num_iter):
+            out = alpha * torch.spmm(self.adj, out) + (1 - alpha) * out.mean(dim=0)
+            out[self.know_mask] = beta * out[self.know_mask] + (1 - beta) * self.out_k_init
+        return out * self.std + self.mean
+
+    def umtp2(self, out: torch.Tensor = None, alpha: float = 0.999, beta: float = 0.70, gamma: float = 0.75,
               num_iter: int = 1, **kw) -> torch.Tensor:
         if out is None:
-            out = self.out
+            out = self.out.clone().detach()
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = gamma * (alpha * torch.spmm(self.adj, out) + (1 - alpha) * out.mean(dim=0)) + (1 - gamma) * out
             out[self.know_mask] = beta * out[self.know_mask] + (1 - beta) * self.out_k_init
         return out * self.std + self.mean
 
-    def umtp_analytical_solution(self, alpha: float = 0.85, beta: float = 0.70, **kw) -> torch.Tensor:
+    def umtp_analytical_solution(self, alpha: float = 0.999, beta: float = 0.70, **kw) -> torch.Tensor:
         n_nodes = self.n_nodes
         theta = (1 - 1 / self.n_nodes) * (1 / alpha - 1)
         eta = (1 / beta - 1) / alpha
@@ -196,11 +228,12 @@ class APA:
 
 class UMTPLabel:
 
-    def __init__(self, edge_index: Adj, x: torch.Tensor, y: torch.Tensor, know_mask: torch.Tensor, is_binary: bool):
+    def __init__(self, edge_index: Adj, x: torch.Tensor, y: torch.Tensor, know_mask: torch.Tensor, is_binary: bool, is_connect: bool=False):
         self.x = x
         self.y = y
         self.n_nodes = x.size(0)
         self.edge_index = edge_index
+        self.is_connect = is_connect
         self._adj = None
 
         self._label_adj = None
@@ -262,7 +295,8 @@ class UMTPLabel:
             self._label_adj_all = get_propagation_matrix(edge_index, self.n_nodes)
         return self._label_adj_all
 
-    def umtp(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, num_iter: int = 1, **kw) -> torch.Tensor:
+    def umtp(self, out: torch.Tensor = None, beta: float = 0.70, num_iter: int = 1, **kw) -> torch.Tensor:
+        alpha: float = 1.0 if self.is_connect else 0.999
         if out is None:
             out = self.out
         out = (out - self.mean) / self.std
@@ -271,7 +305,8 @@ class UMTPLabel:
             out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
         return out * self.std + self.mean
 
-    def _umtp_label(self, adj: Adj, mask:torch.Tensor, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1):
+    def _umtp_label(self, adj: Adj, mask:torch.Tensor, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1):
+        alpha: float = 1.0 if self.is_connect else 0.999
         G = torch.ones(self.n_nodes)
         G[mask] = gamma
         G = G.unsqueeze(1)
@@ -283,23 +318,24 @@ class UMTPLabel:
             out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
         return out * self.std + self.mean
 
-    def umtp_label_25(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label_25(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         adj,mask=self.label_adj_25()
-        return self._umtp_label(adj,mask,out,alpha,beta,gamma,num_iter)
+        return self._umtp_label(adj,mask,out,beta,gamma,num_iter)
 
-    def umtp_label(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         adj,mask=self.label_adj()
-        return self._umtp_label(adj,mask,out,alpha,beta,gamma,num_iter)
+        return self._umtp_label(adj,mask,out,beta,gamma,num_iter)
 
-    def umtp_label_50(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label_50(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         adj,mask=self.label_adj_50()
-        return self._umtp_label(adj,mask,out,alpha,beta,gamma,num_iter)
+        return self._umtp_label(adj,mask,out,beta,gamma,num_iter)
 
-    def umtp_label_75(self, out: torch.Tensor = None, alpha: float = 0.85, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label_75(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
         adj,mask=self.label_adj_75()
-        return self._umtp_label(adj,mask,out,alpha,beta,gamma,num_iter)
+        return self._umtp_label(adj,mask,out,beta,gamma,num_iter)
 
-    def umtp_label_100(self, out: torch.Tensor = None, alpha: float = 1.0, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+    def umtp_label_100(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):
+        alpha: float = 1.0 if self.is_connect else 0.999
         if out is None:
             out = self.out
         out = (out - self.mean) / self.std
