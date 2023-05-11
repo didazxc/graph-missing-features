@@ -12,7 +12,7 @@ logger = logging.getLogger('amgraph.validators.estimation')
 
 class EstDataset:
     def __init__(self, data_name: str, split, seed: int,
-                 max_num_iter: int, min_num_iter: int, k_index: int,
+                 max_num_iter: int, min_num_iter: int = 1, k_index: int = -1,
                  early_stop: bool = True):
         self.data = d.load_data(data_name, split, seed)
         self.seed_idx = seed

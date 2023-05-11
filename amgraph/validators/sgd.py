@@ -2,7 +2,7 @@ from ..data import data as d
 from ..metrics import calc_single_score, greater_is_better
 from ..utils import SearchPoints, Scores
 from ..models.apa import APA, UMTPLoss, UMTPwithParams
-from .estimation import EstimationValidator
+from .estimation import EstimationValidator, EstDataset
 import logging
 import numpy as np
 import torch
@@ -187,7 +187,11 @@ class SGDValidator:
                 print(epoch - 30, alpha1.item(), beta1.item(), best_score, test_score_str)
 
     @staticmethod
-    def sgd_params_vector(dataset_names=['pubmed'], epochs=2000, k_index=-1):
+    def sgd_params_vector(file_name, dataset_names=['cora', 'citeseer', 'computers', 'photo', 'pubmed', 'cs', 'arxiv'], epochs=2000):
+
+        scores = Scores(file_name=file_name)
+        scores.load()
+
         for seed in range(1):
             np.random.seed(seed)
             torch.manual_seed(seed)
@@ -196,40 +200,38 @@ class SGDValidator:
 
             for dataset_name in dataset_names:
 
-                all_metrics, all_ks = EstimationValidator.metric_and_ks(dataset_name)
-                metric, k = all_metrics[k_index], all_ks[k_index]
-                edge_index, x_all, y_all, trn_nodes, val_nodes, test_nodes, num_classes = d.load_data(dataset_name,
-                                                                                                      split=(
-                                                                                                      0.4, 0.1, 0.5),
-                                                                                                      seed=seed)
-                umtp = UMTPwithParams(x_all, y_all, edge_index, trn_nodes, d.is_binary(dataset_name))
+                est_data = EstDataset(dataset_name, split=(0.4, 0.1, 0.5), seed=seed, max_num_iter=2000)
+                umtp = UMTPwithParams(est_data.data.x, est_data.data.edges, est_data.data.trn_mask, est_data.data.is_binary)
 
                 loss_fn = nn.MSELoss()
                 optimizer = torch.optim.Adam(umtp.parameters(), lr=0.05)
                 best_score = None
                 test_score = None
-
+                test_score_str = ''
+                epoch = 0
                 no_improve_count = 0
 
                 for epoch in range(epochs):
                     x_hat = umtp()
-                    loss = loss_fn(x_hat[val_nodes], x_all[val_nodes])
+                    loss = loss_fn(x_hat[est_data.data.val_mask], est_data.data.x[est_data.data.val_mask])
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
-                    score = calc_single_score(dataset_name, x_hat, x_all, val_nodes, metric, k)
-                    if best_score is None or (greater_is_better(metric) == (score > best_score)):
+                    score = est_data.score(x_hat)
+                    if best_score is None or (greater_is_better(est_data.metric) == (score > best_score)):
                         best_score = score
-                        test_score = [calc_single_score(dataset_name, x_hat, x_all, test_nodes, metric, k) for k in
-                                      all_ks]
+                        test_score = [est_data.score(x_hat, 'tst', k=k) for k in est_data.all_ks]
                         test_score_str = ','.join([f"{s:7.5f}" for s in test_score])
                         no_improve_count = 0
                     else:
                         no_improve_count += 1
                     print(
-                        f"seed={seed:2d} dataset_name={dataset_name:8s} metric={metric:5s} epoch={epoch:4d} best_score={best_score:7.5f} test_score=({test_score_str}) loss={loss:7.5f} score={score:7.5f}")
+                        f"seed={seed:2d} dataset_name={dataset_name:8s} metric={est_data.metric:5s} epoch={epoch:4d} best_score={best_score:7.5f} test_score=({test_score_str}) loss={loss:7.5f} score={score:7.5f}")
 
                     if no_improve_count >= 30:
                         break
-                print(epoch - 30, best_score, test_score_str)
+                row = f"{est_data.metric}_umtp"
+                col = f"{dataset_name}@{est_data.k}"
+                scores.add_score(row, col, test_score, seed)
+                scores.print()
 

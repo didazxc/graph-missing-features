@@ -11,12 +11,12 @@ def main():
     # ClassificationValidator.run(file_name="class_k10_eq30", est_scores_file_name="combine_k10_eq30")
     # ClassificationValidator.run(file_name="class_k50_le30", est_scores_file_name="combine_k50_le30", val_only_once=False)
     # ClassificationValidator.run(file_name="class_mlp_k50_eq30", est_scores_file_name="combine_k50_eq30", run_algos=["fp"])
-    ClassificationValidator.run(file_name="class_mlp_k50_le30", est_scores_file_name="combine_k50_le30", dataset_names=['citeseer'], run_algos=['umtp_beta'])
+    # ClassificationValidator.run(file_name="class_mlp_k50_le30", est_scores_file_name="combine_k50_le30", dataset_names=['citeseer'], run_algos=['umtp_beta'])
     # SGDValidator.run_compare()
     # EstimationValidator.early_stop()
     # EstimationValidator.multi_run("label_k50_le30_k10", max_num_iter=30, early_stop=True, k_index=-1, dataset_names=['cora', 'computers'] ,run_algos=['umtp_beta', 'umtp_label_25','umtp_label_50', 'umtp_label_75', 'umtp_label_100', 'umtp_label_all'])
     # SGDValidator.sgd_params_search()
-    # SGDValidator.sgd_params_vector()
+    SGDValidator.sgd_params_vector()
     # PathTest.params_robust()
 
     

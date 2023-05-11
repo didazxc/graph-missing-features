@@ -395,10 +395,9 @@ class UMTPLoss(nn.Module):
 
 class UMTPwithParams(nn.Module):
 
-    def __init__(self, x: torch.Tensor, y: torch.Tensor, edge_index: Adj, know_mask: torch.Tensor, is_binary: bool):
+    def __init__(self, x: torch.Tensor, edge_index: Adj, know_mask: torch.Tensor, is_binary: bool):
         super().__init__()
         self.x = x
-        self.y = y
         self.n_nodes = x.size(0)
         self.n_attrs = x.size(1)
         self.edge_index = edge_index
