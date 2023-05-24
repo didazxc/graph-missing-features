@@ -310,12 +310,13 @@ class UMTPLabel:
         G = torch.ones(self.n_nodes)
         G[mask] = gamma
         G = G.unsqueeze(1)
+        B = 1/(1+(1/beta-1)*G)
         if out is None:
             out = self.out
         out = (out - self.mean) / self.std
         for _ in range(num_iter):
             out = G*(alpha*torch.spmm(self.adj, out)+(1-alpha)*out.mean(dim=0)) + (1-G)*torch.spmm(adj, out)
-            out[self.know_mask] = beta*out[self.know_mask] + (1-beta)*self.out_k_init
+            out[self.know_mask] = B[self.know_mask]*out[self.know_mask] + (1-B[self.know_mask])*self.out_k_init
         return out * self.std + self.mean
 
     def umtp_label_25(self, out: torch.Tensor = None, beta: float = 0.70, gamma:float = 0.75, num_iter: int = 1, **kw):

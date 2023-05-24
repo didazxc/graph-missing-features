@@ -40,6 +40,10 @@ class EstDataset:
             metric = self.metric
         return calc_single_score(self.data.data_name, x_hat, self.data.x, self.data_mask_names[mask_name], metric, k)
 
+    def to(self, device):
+        self.data.to(device)
+        return self
+
 
 class EstimationValidator:
     def __init__(self, dataset: EstDataset) -> None:

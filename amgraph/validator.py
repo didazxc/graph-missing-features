@@ -16,7 +16,8 @@ def main():
     # EstimationValidator.early_stop()
     # EstimationValidator.multi_run("label_k50_le30_k10", max_num_iter=30, early_stop=True, k_index=-1, dataset_names=['cora', 'computers'] ,run_algos=['umtp_beta', 'umtp_label_25','umtp_label_50', 'umtp_label_75', 'umtp_label_100', 'umtp_label_all'])
     # SGDValidator.sgd_params_search()
-    SGDValidator.sgd_params_vector()
+    # SGDValidator.sgd_params_vector('sgd_params_vector', dataset_names=['cora', 'computers', 'pubmed', 'cs'])
     # PathTest.params_robust()
+    EstimationValidator.run("big_test_k50_le30", dataset_names=['papers100M'], run_algos=['umtp_beta'], max_num_iter=30, early_stop=True, k_index= -1)
 
     

@@ -187,7 +187,8 @@ class SGDValidator:
                 print(epoch - 30, alpha1.item(), beta1.item(), best_score, test_score_str)
 
     @staticmethod
-    def sgd_params_vector(file_name, dataset_names=['cora', 'citeseer', 'computers', 'photo', 'pubmed', 'cs', 'arxiv'], epochs=2000):
+    def sgd_params_vector(file_name, dataset_names=['cora', 'citeseer', 'computers', 'photo', 'pubmed', 'cs', 'arxiv'], epochs=2000, k_index=-1):
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         scores = Scores(file_name=file_name)
         scores.load()
@@ -199,9 +200,15 @@ class SGDValidator:
             torch.backends.cudnn.benchmark = False
 
             for dataset_name in dataset_names:
+                print(dataset_name)
+                metrics, ks = EstDataset.metric_and_ks(dataset_name)
+                row = f"{metrics[k_index]}_umtp"
+                col = f"{dataset_name}@{ks[k_index]}"
+                if scores.has_value(row, col, seed):
+                    continue
 
-                est_data = EstDataset(dataset_name, split=(0.4, 0.1, 0.5), seed=seed, max_num_iter=2000)
-                umtp = UMTPwithParams(est_data.data.x, est_data.data.edges, est_data.data.trn_mask, est_data.data.is_binary)
+                est_data = EstDataset(dataset_name, split=(0.4, 0.1, 0.5), seed=seed, max_num_iter=2000, k_index=k_index)
+                umtp = UMTPwithParams(est_data.data.x.to(device), est_data.data.edges.to(device), est_data.data.trn_mask.to(device), est_data.data.is_binary).to(device)
 
                 loss_fn = nn.MSELoss()
                 optimizer = torch.optim.Adam(umtp.parameters(), lr=0.05)
@@ -212,7 +219,7 @@ class SGDValidator:
                 no_improve_count = 0
 
                 for epoch in range(epochs):
-                    x_hat = umtp()
+                    x_hat = umtp().to('cpu')
                     loss = loss_fn(x_hat[est_data.data.val_mask], est_data.data.x[est_data.data.val_mask])
                     optimizer.zero_grad()
                     loss.backward()
@@ -230,8 +237,7 @@ class SGDValidator:
 
                     if no_improve_count >= 30:
                         break
-                row = f"{est_data.metric}_umtp"
-                col = f"{dataset_name}@{est_data.k}"
+
                 scores.add_score(row, col, test_score, seed)
                 scores.print()
 

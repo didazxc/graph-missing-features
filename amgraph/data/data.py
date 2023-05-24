@@ -155,6 +155,14 @@ class Dataset:
         self.is_binary = is_binary(data_name)
         self.is_continuous = is_continuous(data_name)
 
+    def to(self, device):
+        self.edges = self.edges.to(device)
+        self.x = self.x.to(device)
+        self.y = self.y.to(device)
+        self.trn_mask = self.trn_mask.to(device)
+        self.val_mask = self.val_mask.to(device)
+        self.test_mask = self.test_mask.to(device)
+        return self
 
 def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
@@ -167,6 +175,10 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     elif data_name == 'arxiv':
         from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)
+        data.data.edge_index = to_undirected(data.data.edge_index)
+    elif data_name == 'papers100M':
+        from ogb.nodeproppred import PygNodePropPredDataset
+        data = PygNodePropPredDataset(name='ogbn-papers100M', root=root)
         data.data.edge_index = to_undirected(data.data.edge_index)
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
