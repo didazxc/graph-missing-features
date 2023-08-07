@@ -18,6 +18,6 @@ def main():
     # SGDValidator.sgd_params_search()
     # SGDValidator.sgd_params_vector('sgd_params_vector', dataset_names=['cora', 'computers', 'pubmed', 'cs'])
     # PathTest.params_robust()
-    EstimationValidator.run("big_test_k50_le30", dataset_names=['papers100M'], run_algos=['umtp_beta'], max_num_iter=30, early_stop=True, k_index= -1)
-
+    EstimationValidator.run("big_test_k50_le30", dataset_names=['products'], run_algos=['fp', 'umtp_beta', 'umtp', 'umtp_1_0', 'umtp2', 'mtp', 'mtp_partial'], max_num_iter=30, early_stop=True, k_index= -1)
+    # ClassificationValidator.run(file_name="class_mlp_big_k50_le30", dataset_names=['products'], est_scores_file_name="big_test_k50_le30", run_algos=["fp", 'umtp', 'umtp_beta'])
     

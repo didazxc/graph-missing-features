@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 import torch
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_undirected
-from torch_geometric.datasets import Planetoid, Amazon, Coauthor
+from torch_geometric.utils import to_undirected, remove_self_loops, add_remaining_self_loops
+from torch_geometric.datasets import Planetoid, Amazon, Coauthor, Yelp, Reddit
+import torch_geometric.transforms as transforms
 import scipy.sparse as sp
 from sklearn.model_selection import train_test_split
 
@@ -18,7 +19,11 @@ def is_binary(data):
 
 
 def is_continuous(data):
-    return data in ['pubmed', 'coauthor', 'cs', 'arxiv']
+    return data in ['pubmed', 'coauthor', 'cs', 'arxiv', 'products', 'reddit', 'yelp']
+
+
+def is_connect(data):
+    return data in ['pubmed', 'coauthor', 'cs', 'arxiv', 'reddit']
 
 
 def validate_edges(edges):
@@ -154,15 +159,18 @@ class Dataset:
         self.num_attrs = x.size(1) if len(x.size()) > 1 else 1
         self.is_binary = is_binary(data_name)
         self.is_continuous = is_continuous(data_name)
+        self.is_connect = is_connect(data_name)
 
-    def to(self, device):
-        self.edges = self.edges.to(device)
+    def to(self, device, with_edges: bool = False):
+        if with_edges:
+            self.edges = self.edges.to(device)
         self.x = self.x.to(device)
         self.y = self.y.to(device)
         self.trn_mask = self.trn_mask.to(device)
         self.val_mask = self.val_mask.to(device)
         self.test_mask = self.test_mask.to(device)
         return self
+
 
 def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
@@ -176,12 +184,20 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
         from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-arxiv', root=root)
         data.data.edge_index = to_undirected(data.data.edge_index)
+    elif data_name == 'products':
+        from ogb.nodeproppred import PygNodePropPredDataset
+        data = PygNodePropPredDataset(name='ogbn-products', root=root)
+        data.data.edge_index = remove_self_loops(to_undirected(data.data.edge_index))[0]
     elif data_name == 'papers100M':
         from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-papers100M', root=root)
         data.data.edge_index = to_undirected(data.data.edge_index)
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
+    elif data_name == 'yelp':
+        data = Yelp(f"{root}/Yelp")
+    elif data_name == 'reddit':
+        data = Reddit(f"{root}/Reddit")
     elif data_name == 'citeseer':
         data = Planetoid(root, 'CiteSeer')
     elif data_name == 'pubmed':
@@ -203,7 +219,7 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     node_y = dat.y.squeeze()
     edges = dat.edge_index
 
-    validate_edges(edges)
+    # validate_edges(edges)
 
     if split is None:
         if hasattr(dat, 'train_mask'):
@@ -217,10 +233,9 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     elif len(split) == 3 and sum(split) == 1:
         trn_size, val_size, test_size = split
         indices = np.arange(node_x.shape[0])
-        trn_nodes, test_nodes = train_test_split(indices, test_size=test_size, random_state=seed,
-                                                 stratify=node_y)
+        trn_nodes, test_nodes = train_test_split(indices, test_size=test_size, random_state=seed)  # ,stratify=node_y)
         trn_nodes, val_nodes = train_test_split(trn_nodes, test_size=val_size / (trn_size + val_size),
-                                                random_state=seed, stratify=node_y[trn_nodes])
+                                                random_state=seed)  # ,stratify=node_y[trn_nodes])
 
         trn_nodes = torch.from_numpy(trn_nodes).to(torch.long)
         val_nodes = torch.from_numpy(val_nodes).to(torch.long)
@@ -243,5 +258,7 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
 
 
 if __name__ == '__main__':
-    load_data('steam')
+    # load_data('products', split=(0.4, 0.1, 0.5))
+    load_data('yelp', split=(0.4, 0.1, 0.5))
+    load_data('reddit', split=(0.4, 0.1, 0.5))
     print('Data process done!')

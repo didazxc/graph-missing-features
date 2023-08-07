@@ -8,6 +8,8 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import get_laplacian, remove_self_loops
 
 
+
+
 def get_normalized_adjacency(edge_index, n_nodes, mode=None):
     edge_weight = torch.ones((edge_index.size(1),), device=edge_index.device)
     row, col = edge_index[0], edge_index[1]
@@ -74,19 +76,19 @@ class APA:
         self.edge_index = edge_index
         self.x = x
         self.n_nodes = x.size(0)
-        self.know_mask = know_mask
+        self.know_mask = know_mask.to(x.device)
         self.is_connect = is_connect
-        self.mean = 0 if is_binary else x[know_mask].mean(dim=0)
-        self.std = 1  # if is_binary else x[know_mask].std(dim=0)
+        self.mean = 0 if is_binary else x[know_mask].mean(dim=0).to(x.device)
+        self.std = 1  # if is_binary else x[know_mask].std(dim=0).to(x.device)
         self.out_k_init = (self.x[self.know_mask] - self.mean) / self.std
-        self.out = torch.zeros_like(self.x)
+        self.out = torch.zeros_like(self.x).to(x.device)
         self.out[self.know_mask] = self.x[self.know_mask]
         self._adj = None
         self._unlearn_mask = self._unlearn_mask()
 
     def _unlearn_mask(self):
         num_iter = 30
-        out = torch.zeros(self.n_nodes, 1)
+        out = torch.zeros(self.n_nodes, 1).to(self.out.device)
         out[self.know_mask] = 1
         for _ in range(num_iter):
             out = torch.spmm(self.adj, out)
@@ -95,7 +97,7 @@ class APA:
     @property
     def adj(self):
         if self._adj is None:
-            self._adj = get_propagation_matrix(self.edge_index, self.n_nodes)
+            self._adj = get_propagation_matrix(self.edge_index, self.n_nodes).to(self.x.device)
         return self._adj
 
     def fp(self, out: torch.Tensor = None, num_iter: int = 1, **kw) -> torch.Tensor:

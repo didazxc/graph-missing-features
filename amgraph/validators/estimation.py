@@ -8,6 +8,7 @@ import torch
 import multiprocessing
 
 logger = logging.getLogger('amgraph.validators.estimation')
+default_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 class EstDataset:
@@ -99,9 +100,8 @@ class EstimationValidator:
         best_params["num_iter"] = s.best_out[0][1]
         return best_params, s.best_out[0][0]
 
-    def search_best_scores_once(self, apa_fn, params_range_kw: dict) -> list:
+    def search_best_scores_once(self, algo_name, apa_fn, params_range_kw: dict) -> list:
         scores = []
-        algo_name = apa_fn.__name__
         best_params, best_x_hat = self._search_best(apa_fn, params_range_kw=params_range_kw, metric=self.metric,
                                                     k=self.k)
         for metric in self.dataset.all_metrics:
@@ -115,9 +115,8 @@ class EstimationValidator:
                 scores.append((row, f"{self.dataset_name}@{k}_params", best_params))
         return scores
 
-    def search_best_scores(self, apa_fn, params_range_kw: dict, metric, k) -> list:
+    def search_best_scores(self, algo_name, apa_fn, params_range_kw: dict, metric, k) -> list:
         scores = []
-        algo_name = apa_fn.__name__
         best_params, best_x_hat = self._search_best(apa_fn, params_range_kw=params_range_kw, metric=metric, k=k)
         row = f"{metric}_{algo_name}"
         col_name = f"{self.dataset_name}@{k}"
@@ -132,7 +131,7 @@ class EstimationValidator:
     def run(file_name="iter_le_30",
             dataset_names=['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv'],
             run_algos=['fp', 'pr', 'ppr', 'mtp', 'umtp', 'umtp2'], max_num_iter=30, only_val_once=True,
-            early_stop=True, k_index=0):
+            early_stop=True, k_index=0, split=(0.4, 0.1, 0.5)):
         scores = Scores(file_name=file_name)
         scores.load()
         for seed in range(10):
@@ -141,8 +140,8 @@ class EstimationValidator:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
             for dataset_name in dataset_names:
-                data = EstDataset(dataset_name, split=(0.4, 0.1, 0.5), seed=seed, max_num_iter=max_num_iter, min_num_iter=1, k_index=k_index, early_stop=early_stop)
-                apa = APA(data.data.edges, data.data.x, data.data.trn_mask, data.data.is_binary, data.data.is_continuous)
+                data = EstDataset(dataset_name, split=split, seed=seed, max_num_iter=max_num_iter, min_num_iter=1, k_index=k_index, early_stop=early_stop).to(default_device)
+                apa = APA(data.data.edges, data.data.x, data.data.trn_mask, data.data.is_binary, data.data.is_connect)
                 umtp = UMTPLabel(data.data.edges, data.data.x, data.data.y, data.data.trn_mask, data.data.is_binary)
                 print('unlabel_mask', dataset_name, seed, len(apa._unlearn_mask))
                 v = EstimationValidator(data)
@@ -153,6 +152,7 @@ class EstimationValidator:
                     'mtp': (apa.mtp, {"beta": (0.0, 1.0)}),
                     'mtp_partial': (apa.mtp_partial, {"beta": (0.0, 1.0)}),
                     'umtp_beta': (apa.umtp_beta, {"beta": (0.0, 1.0)}),
+                    'umtp_1_0': (apa.umtp, {"alpha": (0.9, 1.0), "beta": (0.0, 0.1)}),
                     'umtp': (apa.umtp, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0)}),
                     'umtp2': (apa.umtp2, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
                     'umtp_label': (umtp.umtp_label, {"alpha": (0.0, 1.0), "beta": (0.0, 1.0), "gamma": (0.0, 1.0)}),
@@ -168,7 +168,7 @@ class EstimationValidator:
                         k = v.k
                         if not EstimationValidator.is_executed(scores, seed_idx=seed, dataset_name=dataset_name,
                                                                algo_name=algo_name, metric=metric, k=k):
-                            for row, col, value in v.search_best_scores_once(algos[algo_name][0], algos[algo_name][1]):
+                            for row, col, value in v.search_best_scores_once(algo_name, algos[algo_name][0], algos[algo_name][1]):
                                 scores.add_score(row, col, value, seed)
                             scores.print()
                     else:
@@ -176,7 +176,7 @@ class EstimationValidator:
                             for k in data.all_ks:
                                 if not EstimationValidator.is_executed(scores, seed_idx=seed, dataset_name=dataset_name,
                                                                        algo_name=algo_name, metric=metric, k=k):
-                                    for row, col, value in v.search_best_scores(algos[algo_name][0],
+                                    for row, col, value in v.search_best_scores(algo_name, algos[algo_name][0],
                                                                                 algos[algo_name][1], metric, k):
                                         scores.add_score(row, col, value, seed)
                                     scores.print()

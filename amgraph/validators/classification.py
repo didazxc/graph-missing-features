@@ -12,6 +12,7 @@ from torch import nn
 from torch_geometric.utils import subgraph
 
 logger = logging.getLogger('amgraph.validators.classification')
+default_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 class ClassificationValidator:
@@ -53,8 +54,8 @@ class ClassificationValidator:
             optimizer.step()
             if best_loss is None or loss.item() <= best_loss:
                 best_loss = loss.item()
-                train_acc = to_acc(torch.argmax(y_hat[trn_nodes], dim=1), y[trn_nodes])
-                acc = to_acc(torch.argmax(y_hat[val_nodes], dim=1), y[val_nodes])
+                train_acc = to_acc(torch.argmax(y_hat[trn_nodes], dim=1), y[trn_nodes]).to("cpu")
+                acc = to_acc(torch.argmax(y_hat[val_nodes], dim=1), y[val_nodes]).to("cpu")
             if epoch % 100 == 0:
                 logger.debug(f"{epoch:4d} best_loss:{best_loss:7.5f} train_acc:{train_acc:7.5f} acc:{acc:7.5f}")
         return acc
@@ -65,9 +66,9 @@ class ClassificationValidator:
         logger.info(f"start model {conv}")
         for trn_nodes, val_nodes in splits.split(self.test_nodes):
             if conv == "GCN":
-                model = GNN(self.num_attrs, self.num_classes, num_layers=2, hidden_size=256)
+                model = GNN(self.num_attrs, self.num_classes, num_layers=3, hidden_size=64).to(x_hat.device)
             else:
-                model = MLP(self.num_attrs, self.num_classes, num_layers=2, hidden_size=256)
+                model = MLP(self.num_attrs, self.num_classes, num_layers=2, hidden_size=256).to(x_hat.device)
             loss_fn = nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
             acc = self.train(model, loss_fn, optimizer, self.epoches, x_hat, self.edges, self.y_all, trn_nodes,
@@ -88,8 +89,7 @@ class ClassificationValidator:
         self.scores.add_score(new_row, new_col, value)
         self.scores.print()
 
-    def validate_from_scores(self, apa_fn, est_scores: Scores, val_only_once):
-        algo_name = apa_fn.__name__
+    def validate_from_scores(self, algo_name, apa_fn, est_scores: Scores, val_only_once):
         convs = ["MLP"]  # ["GCN", "MLP"]
         metrics, ks = ([self.metric], [self.k]) if val_only_once else (self.metrics, self.ks)
         for metric in metrics:
@@ -125,7 +125,7 @@ class ClassificationValidator:
             torch.backends.cudnn.benchmark = False
 
             for dataset_name in dataset_names:
-                data = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed)
+                data = d.load_data(dataset_name, split=(0.4, 0.1, 0.5), seed=seed).to(default_device, True)
                 apa = APA(data.edges, data.x, data.trn_mask, data.is_binary)
                 induced_edge_index, _ = subgraph(data.test_mask, data.edges)
                 c = ClassificationValidator(scores, data, epoches=epoches, seed=seed, seed_idx=seed, k_index=k_index)
@@ -140,11 +140,14 @@ class ClassificationValidator:
                     'ppr': apa.ppr,
                     'mtp': apa.mtp,
                     'umtp': apa.umtp,
+                    'umtp_1_0': apa.umtp,
+                    'mtp_partial': apa.mtp_partial,
                     'umtp2': apa.umtp2,
                     'umtp_beta': apa.umtp_beta
                 }
                 for algo_name in run_algos:
-                    c.validate_from_scores(algos[algo_name], est_scores, val_only_once)
+                    print(dataset_name, seed, algo_name)
+                    c.validate_from_scores(algo_name, algos[algo_name], est_scores, val_only_once)
 
         scores.print()
         print("end")
