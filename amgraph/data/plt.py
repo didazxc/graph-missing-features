@@ -6,6 +6,7 @@ from torch_geometric.utils import assortativity, get_laplacian, convert, to_scip
 import scipy.sparse as sp
 import matplotlib
 import matplotlib.pyplot as plt
+from collections import Counter
 
 
 matplotlib.use("Agg")
@@ -30,7 +31,9 @@ def density(node_x, edges):
 def num_components(node_x, edges):
     n_nodes = node_x.size(0)
     adj = to_scipy_sparse_matrix(edge_index=edges, num_nodes=n_nodes)
-    num = sp.csgraph.connected_components(adj, directed=False, connection="weak", return_labels=False)
+    num, labels = sp.csgraph.connected_components(adj, directed=False, connection="weak", return_labels=True)
+    c = Counter(labels)
+    print(c.most_common(100))
     return num
 
 
@@ -65,7 +68,7 @@ def draw_spectral(data_name, x, edge_index):
 def main():
     need_draw_spring = False
     need_draw_spectral = False
-    data_names = ['products']  # ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
+    data_names = ['yelp', 'reddit']  # ['cora', 'citeseer', 'computers', 'photo', 'steam', 'pubmed', 'cs', 'arxiv']
     print(f'{"":10s} nodes_num edges_num attrs_num homophily num_components assortativity density attr_sparsity')
     for data_name in data_names:
         data = load_data(data_name)

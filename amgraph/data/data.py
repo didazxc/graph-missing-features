@@ -160,6 +160,7 @@ class Dataset:
         self.is_binary = is_binary(data_name)
         self.is_continuous = is_continuous(data_name)
         self.is_connect = is_connect(data_name)
+        self.is_multi_task = data_name == "yelp"
 
     def to(self, device, with_edges: bool = False):
         if with_edges:
@@ -191,7 +192,7 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
     elif data_name == 'papers100M':
         from ogb.nodeproppred import PygNodePropPredDataset
         data = PygNodePropPredDataset(name='ogbn-papers100M', root=root)
-        data.data.edge_index = to_undirected(data.data.edge_index)
+        data.data.edge_index = remove_self_loops(to_undirected(data.data.edge_index))
     elif data_name == 'cora':
         data = Planetoid(root, 'Cora')
     elif data_name == 'yelp':
@@ -258,7 +259,5 @@ def load_data(data_name, split=None, seed=None, verbose=False) -> Dataset:
 
 
 if __name__ == '__main__':
-    # load_data('products', split=(0.4, 0.1, 0.5))
     load_data('yelp', split=(0.4, 0.1, 0.5))
-    load_data('reddit', split=(0.4, 0.1, 0.5))
     print('Data process done!')

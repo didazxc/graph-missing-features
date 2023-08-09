@@ -5,7 +5,12 @@ from sklearn.metrics import ndcg_score
 
 
 @torch.no_grad()
-def to_acc(y_hat: torch.Tensor, y: torch.Tensor):
+def to_acc(y_hat: torch.Tensor, y: torch.Tensor, is_sigmoid: bool = False):
+    if not is_sigmoid:
+        y_hat = torch.argmax(y_hat, dim=1)
+    else:
+        y_hat[y_hat > 0.5] = 1
+        y_hat[y_hat <= 0.5] = 0
     return torch.sum(y_hat == y) / y.size(0)
 
 

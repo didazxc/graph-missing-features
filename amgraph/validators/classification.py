@@ -21,6 +21,7 @@ class ClassificationValidator:
                  seed, seed_idx, k_index=0) -> None:
         self.scores = scores
         self.dataset_name = data.data_name
+        self.is_multi_task = data.is_multi_task
 
         self.edges = data.edges
         self.y_all = data.y
@@ -41,7 +42,7 @@ class ClassificationValidator:
         self.metric, self.k = self.metrics[k_index], self.ks[k_index]
 
     @staticmethod
-    def train(model, loss_fn, optimizer, epoches, x, edges, y, trn_nodes, val_nodes) -> torch.Tensor:
+    def train(model, loss_fn, optimizer, epoches, x, edges, y, trn_nodes, val_nodes, is_multi_task: bool = False) -> torch.Tensor:
         model.train()
         best_loss = None
         train_acc = 0
@@ -54,8 +55,8 @@ class ClassificationValidator:
             optimizer.step()
             if best_loss is None or loss.item() <= best_loss:
                 best_loss = loss.item()
-                train_acc = to_acc(torch.argmax(y_hat[trn_nodes], dim=1), y[trn_nodes]).to("cpu")
-                acc = to_acc(torch.argmax(y_hat[val_nodes], dim=1), y[val_nodes]).to("cpu")
+                train_acc = to_acc(y_hat[trn_nodes], y[trn_nodes], is_multi_task).to("cpu")
+                acc = to_acc(y_hat[val_nodes], y[val_nodes], is_multi_task).to("cpu")
             if epoch % 100 == 0:
                 logger.debug(f"{epoch:4d} best_loss:{best_loss:7.5f} train_acc:{train_acc:7.5f} acc:{acc:7.5f}")
         return acc
@@ -72,7 +73,7 @@ class ClassificationValidator:
             loss_fn = nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
             acc = self.train(model, loss_fn, optimizer, self.epoches, x_hat, self.edges, self.y_all, trn_nodes,
-                             val_nodes)
+                             val_nodes, self.is_multi_task)
             logger.info(f"model {conv} acc {acc}")
             acc_list.append(acc)
         acc = np.mean(acc_list)
